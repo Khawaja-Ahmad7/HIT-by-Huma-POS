@@ -7,11 +7,14 @@ const logger = require('../utils/logger');
 // For public connections (proxy), SSL is required
 const isInternalNetwork = process.env.DATABASE_URL?.includes('.railway.internal');
 const isLocalhost = process.env.DATABASE_URL?.includes('localhost') || !process.env.DATABASE_URL;
+const useSSL = !isInternalNetwork && !isLocalhost;
+
+logger.info('Database config:', { isInternalNetwork, isLocalhost, useSSL, hasUrl: !!process.env.DATABASE_URL });
 
 const config = process.env.DATABASE_URL 
   ? {
       connectionString: process.env.DATABASE_URL,
-      ssl: (isInternalNetwork || isLocalhost) ? false : { rejectUnauthorized: false },
+      ssl: useSSL ? { rejectUnauthorized: false } : false,
     }
   : {
       host: process.env.DB_HOST || 'localhost',
