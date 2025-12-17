@@ -290,8 +290,7 @@ export default function Inventory() {
             setSelectedProduct(null);
           }}
           onSave={() => {
-            queryClient.invalidateQueries(['inventory']);
-            queryClient.invalidateQueries(['inventory-summary']);
+            refetch();
             setShowAdjustModal(false);
             setSelectedProduct(null);
           }}
@@ -308,8 +307,7 @@ export default function Inventory() {
             setSelectedProduct(null);
           }}
           onSave={() => {
-            queryClient.invalidateQueries(['inventory']);
-            queryClient.invalidateQueries(['inventory-summary']);
+            refetch();
             setShowTransferModal(false);
             setSelectedProduct(null);
           }}
