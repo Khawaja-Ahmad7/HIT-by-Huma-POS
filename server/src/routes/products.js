@@ -16,32 +16,37 @@ router.get('/', async (req, res, next) => {
     const offset = (page - 1) * limit;
     
     let whereClause = 'WHERE 1=1';
-    const params = {};
+    const params = [];
+    let paramIndex = 1;
     
     if (!includeInactive) {
       whereClause += ' AND p.is_active = true';
     }
     
     if (categoryId) {
-      whereClause += ' AND p.category_id = @categoryId';
-      params.categoryId = parseInt(categoryId);
+      whereClause += ` AND p.category_id = $${paramIndex++}`;
+      params.push(parseInt(categoryId));
     }
     
     if (search) {
-      whereClause += ' AND (p.product_name ILIKE @search OR p.product_code ILIKE @search)';
-      params.search = `%${search}%`;
+      whereClause += ` AND (p.product_name ILIKE $${paramIndex} OR p.product_code ILIKE $${paramIndex})`;
+      params.push(`%${search}%`);
+      paramIndex++;
     }
     
     // Get products with pagination
     const result = await db.query(
       `SELECT p.*, c.category_name,
-        (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.product_id AND pv.is_active = true) as variant_count
+        (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.product_id AND pv.is_active = true) as variant_count,
+        (SELECT COALESCE(SUM(i.quantity_on_hand), 0) FROM product_variants pv2 
+         LEFT JOIN inventory i ON pv2.variant_id = i.variant_id 
+         WHERE pv2.product_id = p.product_id) as total_stock
        FROM products p
        LEFT JOIN categories c ON p.category_id = c.category_id
        ${whereClause}
        ORDER BY p.product_name
-       LIMIT @limit OFFSET @offset`,
-      { ...params, limit: parseInt(limit), offset }
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      [...params, parseInt(limit), offset]
     );
     
     // Get total count
@@ -50,8 +55,27 @@ router.get('/', async (req, res, next) => {
       params
     );
     
+    // Transform to camelCase for frontend
+    const products = result.recordset.map(p => ({
+      id: p.product_id,
+      code: p.product_code,
+      name: p.product_name,
+      categoryId: p.category_id,
+      category: { id: p.category_id, name: p.category_name },
+      description: p.description,
+      basePrice: p.base_price,
+      costPrice: p.cost_price,
+      taxRate: p.tax_rate,
+      hasVariants: p.has_variants,
+      isActive: p.is_active,
+      variantCount: parseInt(p.variant_count) || 0,
+      totalStock: parseInt(p.total_stock) || 0,
+      createdAt: p.created_at,
+      updatedAt: p.updated_at
+    }));
+
     res.json({
-      products: result.recordset,
+      products,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -314,21 +338,24 @@ router.post('/', authorize('products'), [
 router.put('/:id', authorize('products'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { productName, categoryId, description, basePrice, costPrice, taxRate, isActive } = req.body;
+    const { productName, name, categoryId, category_id, description, basePrice, costPrice, taxRate, isActive } = req.body;
+    
+    const finalName = productName || name;
+    const finalCategoryId = categoryId || category_id;
     
     const result = await db.query(
       `UPDATE products 
-       SET product_name = COALESCE(@productName, product_name),
-           category_id = COALESCE(@categoryId, category_id),
-           description = COALESCE(@description, description),
-           base_price = COALESCE(@basePrice, base_price),
-           cost_price = COALESCE(@costPrice, cost_price),
-           tax_rate = COALESCE(@taxRate, tax_rate),
-           is_active = COALESCE(@isActive, is_active),
+       SET product_name = COALESCE($1, product_name),
+           category_id = COALESCE($2, category_id),
+           description = COALESCE($3, description),
+           base_price = COALESCE($4, base_price),
+           cost_price = COALESCE($5, cost_price),
+           tax_rate = COALESCE($6, tax_rate),
+           is_active = COALESCE($7, is_active),
            updated_at = CURRENT_TIMESTAMP
-       WHERE product_id = @id
+       WHERE product_id = $8
        RETURNING *`,
-      { id: parseInt(id), productName, categoryId, description, basePrice, costPrice, taxRate, isActive }
+      [finalName, finalCategoryId, description, basePrice, costPrice, taxRate, isActive, parseInt(id)]
     );
     
     if (result.recordset.length === 0) {
@@ -336,6 +363,33 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
     }
     
     res.json(result.recordset[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete product (soft delete)
+router.delete('/:id', authorize('products'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    // Soft delete - set is_active to false
+    const result = await db.query(
+      `UPDATE products SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE product_id = $1 RETURNING *`,
+      [parseInt(id)]
+    );
+    
+    if (result.recordset.length === 0) {
+      throw new NotFoundError('Product not found');
+    }
+    
+    // Also deactivate variants
+    await db.query(
+      `UPDATE product_variants SET is_active = false WHERE product_id = $1`,
+      [parseInt(id)]
+    );
+    
+    res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     next(error);
   }
