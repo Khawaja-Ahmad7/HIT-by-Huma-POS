@@ -1,46 +1,19 @@
 const sql = require('mssql');
 const logger = require('../utils/logger');
 
-// Check if using Windows Authentication
-const useTrustedConnection = process.env.DB_TRUSTED_CONNECTION === 'true';
-
+// Cloud deployment uses SQL Server Authentication only
+// Windows Authentication (msnodesqlv8) is not available on Linux servers
 const config = {
   server: process.env.DB_SERVER || 'localhost',
   port: parseInt(process.env.DB_PORT) || 1433,
   database: process.env.DB_NAME || 'HitByHumaPOS',
-  // Windows Authentication: use trusted connection without user/password
-  // SQL Server Authentication: use user/password
-  ...(useTrustedConnection 
-    ? {
-        // Windows Authentication (Trusted Connection)
-        options: {
-          encrypt: process.env.DB_ENCRYPT === 'true',
-          trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
-          enableArithAbort: true,
-          trustedConnection: true,
-        },
-        authentication: {
-          type: 'ntlm',
-          options: {
-            domain: process.env.DB_DOMAIN || '',
-            userName: process.env.DB_WINDOWS_USER || '',
-            password: process.env.DB_WINDOWS_PASSWORD || '',
-          }
-        },
-        // For pure Windows Auth without explicit credentials
-        driver: 'msnodesqlv8',
-      }
-    : {
-        // SQL Server Authentication
-        user: process.env.DB_USER || 'sa',
-        password: process.env.DB_PASSWORD || '',
-        options: {
-          encrypt: process.env.DB_ENCRYPT === 'true',
-          trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
-          enableArithAbort: true,
-        },
-      }
-  ),
+  user: process.env.DB_USER || 'sa',
+  password: process.env.DB_PASSWORD || '',
+  options: {
+    encrypt: process.env.DB_ENCRYPT === 'true',
+    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
+    enableArithAbort: true,
+  },
   pool: {
     max: 20,
     min: 5,
