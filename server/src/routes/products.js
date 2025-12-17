@@ -180,8 +180,8 @@ router.post('/', authorize('products'), [
     }
     
     const result = await db.query(
-      `INSERT INTO products (product_code, product_name, category_id, description, base_price, cost_price, tax_rate, barcode, created_by)
-       VALUES (@productCode, @productName, @categoryId, @description, @basePrice, @costPrice, @taxRate, @barcode, @createdBy)
+      `INSERT INTO products (product_code, product_name, category_id, description, base_price, cost_price, tax_rate, created_by)
+       VALUES (@productCode, @productName, @categoryId, @description, @basePrice, @costPrice, @taxRate, @createdBy)
        RETURNING *`,
       { 
         productCode: finalCode,
@@ -191,7 +191,6 @@ router.post('/', authorize('products'), [
         basePrice,
         costPrice: costPrice || 0,
         taxRate: taxRate || 0,
-        barcode: barcode || null,
         createdBy: req.user.user_id
       }
     );
