@@ -61,6 +61,41 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Get payment methods - MUST be before /:id route
+router.get('/payment-methods/list', async (req, res, next) => {
+  try {
+    const pool = db.getPool();
+    const result = await pool.query(
+      `SELECT * FROM payment_methods WHERE is_active = true ORDER BY sort_order`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get parked sales - MUST be before /:id route
+router.get('/parked/list', async (req, res, next) => {
+  try {
+    const { locationId } = req.query;
+    const pool = db.getPool();
+    
+    const result = await pool.query(
+      `SELECT ps.*, u.first_name, u.last_name, c.phone as customer_phone
+       FROM parked_sales ps
+       LEFT JOIN users u ON ps.user_id = u.user_id
+       LEFT JOIN customers c ON ps.customer_id = c.customer_id
+       WHERE ps.location_id = $1
+       ORDER BY ps.created_at DESC`,
+      [parseInt(locationId)]
+    );
+    
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get sale by ID
 router.get('/:id', async (req, res, next) => {
   try {
@@ -110,19 +145,6 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-// Get payment methods
-router.get('/payment-methods/list', async (req, res, next) => {
-  try {
-    const pool = db.getPool();
-    const result = await pool.query(
-      `SELECT * FROM payment_methods WHERE is_active = true ORDER BY sort_order`
-    );
-    res.json(result.rows);
-  } catch (error) {
-    next(error);
-  }
-});
-
 // Create sale
 router.post('/', [
   body('items').isArray({ min: 1 }),
@@ -167,23 +189,47 @@ router.post('/', [
     
     // Insert sale items and update inventory
     for (const item of items) {
+      console.log(`Processing sale item: variantId=${item.variantId}, quantity=${item.quantity}, locationId=${locationId}`);
+      
       await pool.query(
         `INSERT INTO sale_items (sale_id, variant_id, quantity, unit_price, discount_amount, tax_amount, line_total)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [saleId, item.variantId, item.quantity, item.unitPrice, item.discountAmount || 0, item.taxAmount || 0, item.unitPrice * item.quantity]
       );
       
-      // Update inventory
-      await pool.query(
-        `UPDATE inventory SET quantity_on_hand = quantity_on_hand - $1, updated_at = CURRENT_TIMESTAMP
-         WHERE variant_id = $2 AND location_id = $3`,
-        [item.quantity, item.variantId, locationId]
+      // Check if inventory record exists
+      const invCheck = await pool.query(
+        `SELECT inventory_id, quantity_on_hand FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+        [item.variantId, locationId]
       );
+      
+      if (invCheck.rows.length === 0) {
+        // Create inventory record with negative stock (will need adjustment)
+        console.log(`No inventory record found for variant ${item.variantId} at location ${locationId}, creating one`);
+        await pool.query(
+          `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, quantity_reserved, reorder_level, reorder_quantity)
+           VALUES ($1, $2, -$3, 0, 10, 10)`,
+          [item.variantId, locationId, item.quantity]
+        );
+      } else {
+        const currentStock = invCheck.rows[0].quantity_on_hand;
+        console.log(`Current stock for variant ${item.variantId}: ${currentStock}, deducting ${item.quantity}`);
+        
+        // Update inventory
+        const updateResult = await pool.query(
+          `UPDATE inventory SET quantity_on_hand = quantity_on_hand - $1, updated_at = CURRENT_TIMESTAMP
+           WHERE variant_id = $2 AND location_id = $3
+           RETURNING quantity_on_hand`,
+          [item.quantity, item.variantId, locationId]
+        );
+        
+        console.log(`New stock for variant ${item.variantId}: ${updateResult.rows[0]?.quantity_on_hand}`);
+      }
       
       // Log inventory transaction
       await pool.query(
         `INSERT INTO inventory_transactions (variant_id, location_id, transaction_type, quantity_change, quantity_before, quantity_after, reference_type, reference_id, user_id)
-         SELECT $1, $2, 'SALE', $3, quantity_on_hand + $4, quantity_on_hand, 'SALE', $5, $6
+         SELECT $1, $2, 'SALE', $3, COALESCE(quantity_on_hand, 0) + $4, COALESCE(quantity_on_hand, 0), 'SALE', $5, $6
          FROM inventory WHERE variant_id = $1 AND location_id = $2`,
         [item.variantId, locationId, -item.quantity, item.quantity, saleId, req.user.user_id]
       );
@@ -230,28 +276,6 @@ router.post('/park', async (req, res, next) => {
     );
     
     res.json({ success: true, parkedId: result.rows[0].parked_id });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get parked sales
-router.get('/parked/list', async (req, res, next) => {
-  try {
-    const { locationId } = req.query;
-    const pool = db.getPool();
-    
-    const result = await pool.query(
-      `SELECT ps.*, u.first_name, u.last_name, c.phone as customer_phone
-       FROM parked_sales ps
-       LEFT JOIN users u ON ps.user_id = u.user_id
-       LEFT JOIN customers c ON ps.customer_id = c.customer_id
-       WHERE ps.location_id = $1
-       ORDER BY ps.created_at DESC`,
-      [parseInt(locationId)]
-    );
-    
-    res.json(result.rows);
   } catch (error) {
     next(error);
   }

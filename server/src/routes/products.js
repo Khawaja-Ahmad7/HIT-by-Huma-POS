@@ -34,13 +34,18 @@ router.get('/', async (req, res, next) => {
       paramIndex++;
     }
     
-    // Get products with pagination
-    const result = await db.query(
+    const pool = db.getPool();
+    
+    // Get products with pagination and default variant info
+    const result = await pool.query(
       `SELECT p.*, c.category_name,
         (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.product_id AND pv.is_active = true) as variant_count,
         (SELECT COALESCE(SUM(i.quantity_on_hand), 0) FROM product_variants pv2 
          LEFT JOIN inventory i ON pv2.variant_id = i.variant_id 
-         WHERE pv2.product_id = p.product_id) as total_stock
+         WHERE pv2.product_id = p.product_id) as total_stock,
+        (SELECT pv3.variant_id FROM product_variants pv3 WHERE pv3.product_id = p.product_id AND pv3.is_active = true LIMIT 1) as default_variant_id,
+        (SELECT pv4.sku FROM product_variants pv4 WHERE pv4.product_id = p.product_id AND pv4.is_active = true LIMIT 1) as default_sku,
+        (SELECT pv5.barcode FROM product_variants pv5 WHERE pv5.product_id = p.product_id AND pv5.is_active = true LIMIT 1) as default_barcode
        FROM products p
        LEFT JOIN categories c ON p.category_id = c.category_id
        ${whereClause}
@@ -50,26 +55,29 @@ router.get('/', async (req, res, next) => {
     );
     
     // Get total count
-    const countResult = await db.query(
+    const countResult = await pool.query(
       `SELECT COUNT(*) as total FROM products p ${whereClause}`,
       params
     );
     
     // Transform to camelCase for frontend
-    const products = result.recordset.map(p => ({
+    const products = result.rows.map(p => ({
       id: p.product_id,
       code: p.product_code,
       name: p.product_name,
       categoryId: p.category_id,
       category: { id: p.category_id, name: p.category_name },
       description: p.description,
-      basePrice: p.base_price,
-      costPrice: p.cost_price,
-      taxRate: p.tax_rate,
+      basePrice: parseFloat(p.base_price) || 0,
+      costPrice: parseFloat(p.cost_price) || 0,
+      taxRate: parseFloat(p.tax_rate) || 0,
       hasVariants: p.has_variants,
       isActive: p.is_active,
       variantCount: parseInt(p.variant_count) || 0,
       totalStock: parseInt(p.total_stock) || 0,
+      variantId: p.default_variant_id,  // Include default variant ID for POS
+      sku: p.default_sku,
+      barcode: p.default_barcode,
       createdAt: p.created_at,
       updatedAt: p.updated_at
     }));
@@ -79,8 +87,8 @@ router.get('/', async (req, res, next) => {
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: parseInt(countResult.recordset[0].total),
-        pages: Math.ceil(countResult.recordset[0].total / limit)
+        total: parseInt(countResult.rows[0]?.total || 0),
+        pages: Math.ceil((countResult.rows[0]?.total || 0) / limit)
       }
     });
   } catch (error) {
@@ -97,21 +105,64 @@ router.get('/search/quick', async (req, res, next) => {
       return res.json({ products: [] });
     }
     
-    const result = await db.query(
+    const pool = db.getPool();
+    const result = await pool.query(
       `SELECT pv.variant_id, pv.sku, pv.barcode, pv.variant_name, pv.price,
-              p.product_name, p.product_code,
+              p.product_name, p.product_code, p.product_id,
               COALESCE(i.quantity_on_hand, 0) as stock
        FROM product_variants pv
        INNER JOIN products p ON pv.product_id = p.product_id
-       LEFT JOIN inventory i ON pv.variant_id = i.variant_id AND i.location_id = @locationId
+       LEFT JOIN inventory i ON pv.variant_id = i.variant_id AND i.location_id = $1
        WHERE pv.is_active = true AND p.is_active = true
-         AND (pv.sku ILIKE @search OR pv.barcode = @exactSearch 
-              OR p.product_name ILIKE @search OR pv.variant_name ILIKE @search)
+         AND (pv.sku ILIKE $2 OR pv.barcode = $3 
+              OR p.product_name ILIKE $2 OR pv.variant_name ILIKE $2)
        LIMIT 20`,
-      { search: `%${q}%`, exactSearch: q, locationId: parseInt(locationId) || 1 }
+      [parseInt(locationId) || 1, `%${q}%`, q]
     );
     
-    res.json({ products: result.recordset });
+    res.json({ products: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Lookup product by barcode (for barcode scanner)
+router.get('/barcode/:barcode', async (req, res, next) => {
+  try {
+    const { barcode } = req.params;
+    const locationId = req.query.locationId || 1;
+    
+    const pool = db.getPool();
+    const result = await pool.query(
+      `SELECT pv.variant_id as "variantId", pv.sku, pv.barcode, pv.variant_name as "variantName", pv.price,
+              p.product_id as "productId", p.product_name as "productName", p.product_code as "productCode",
+              p.image_url as "imageUrl",
+              COALESCE(i.quantity_on_hand, 0) as stock
+       FROM product_variants pv
+       INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN inventory i ON pv.variant_id = i.variant_id AND i.location_id = $1
+       WHERE pv.is_active = true AND p.is_active = true
+         AND (pv.barcode = $2 OR pv.sku = $2)
+       LIMIT 1`,
+      [parseInt(locationId), barcode]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Product not found', barcode });
+    }
+    
+    const product = result.rows[0];
+    res.json({
+      variantId: product.variantId,
+      productId: product.productId,
+      productName: product.productName,
+      variantName: product.variantName,
+      sku: product.sku,
+      barcode: product.barcode,
+      price: parseFloat(product.price),
+      imageUrl: product.imageUrl,
+      stock: parseInt(product.stock)
+    });
   } catch (error) {
     next(error);
   }

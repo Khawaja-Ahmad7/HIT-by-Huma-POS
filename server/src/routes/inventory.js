@@ -355,4 +355,46 @@ router.post('/transfers', authorize('inventory'), async (req, res, next) => {
   }
 });
 
+// Get inventory alerts (low stock and out of stock)
+router.get('/alerts', async (req, res, next) => {
+  try {
+    const pool = db.getPool();
+    
+    // Get low stock threshold from settings
+    const thresholdResult = await pool.query(
+      `SELECT setting_value FROM settings WHERE setting_key = $1`,
+      ['low_stock_threshold']
+    );
+    const lowStockThreshold = parseInt(thresholdResult.rows[0]?.setting_value) || 10;
+    
+    // Get products that are low stock or out of stock
+    const result = await pool.query(
+      `SELECT p.product_name, pv.variant_name, pv.sku,
+              COALESCE(SUM(i.quantity_on_hand), 0) as quantity
+       FROM product_variants pv
+       INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN inventory i ON pv.variant_id = i.variant_id
+       WHERE pv.is_active = true AND p.is_active = true
+       GROUP BY p.product_name, pv.variant_name, pv.sku
+       HAVING COALESCE(SUM(i.quantity_on_hand), 0) <= $1
+       ORDER BY COALESCE(SUM(i.quantity_on_hand), 0) ASC
+       LIMIT 20`,
+      [lowStockThreshold]
+    );
+    
+    // Transform to frontend format
+    const alerts = result.rows.map(item => ({
+      name: item.variant_name ? `${item.product_name} - ${item.variant_name}` : item.product_name,
+      quantity: parseInt(item.quantity) || 0,
+      sku: item.sku,
+      reorderLevel: lowStockThreshold
+    }));
+    
+    res.json(alerts);
+  } catch (error) {
+    console.error('Inventory alerts error:', error);
+    next(error);
+  }
+});
+
 module.exports = router;
