@@ -36,6 +36,13 @@ export default function Inventory() {
     name: loc.LocationName
   })) || [];
 
+  // Fetch settings for threshold
+  const { data: settingsData } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api.get('/settings').then(res => res.data)
+  });
+  const lowStockThreshold = parseInt(settingsData?.low_stock_threshold?.value) || 10;
+
   // Fetch inventory
   const { data: inventoryData, isLoading, refetch } = useQuery({
     queryKey: ['inventory', selectedLocation, searchQuery, stockFilter],
@@ -53,7 +60,7 @@ export default function Inventory() {
   const summary = inventoryData?.summary || {
     totalProducts: inventory.length,
     totalValue: inventory.reduce((sum, item) => sum + ((item.quantity || 0) * (item.variant?.price || 0)), 0),
-    lowStock: inventory.filter(item => item.quantity > 0 && item.quantity <= (item.reorderLevel || 5)).length,
+    lowStock: inventory.filter(item => item.quantity > 0 && item.quantity <= lowStockThreshold).length,
     outOfStock: inventory.filter(item => (item.quantity || 0) <= 0).length
   };
 
@@ -61,7 +68,7 @@ export default function Inventory() {
   const filteredInventory = stockFilter === 'out' 
     ? inventory.filter(item => (item.quantity || 0) <= 0)
     : stockFilter === 'low'
-    ? inventory.filter(item => item.quantity > 0 && item.quantity <= (item.reorderLevel || 5))
+    ? inventory.filter(item => item.quantity > 0 && item.quantity <= lowStockThreshold)
     : inventory;
 
   const handleAdjust = (product) => {
@@ -242,10 +249,10 @@ export default function Inventory() {
                   </td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                      getStockStatusColor(item.quantity || 0, item.reorderLevel || 5)
+                      getStockStatusColor(item.quantity || 0, item.reorderLevel || lowStockThreshold)
                     }`}>
                       {(item.quantity || 0) <= 0 ? 'Out of Stock' :
-                       (item.quantity || 0) <= (item.reorderLevel || 5) ? 'Low Stock' : 'In Stock'}
+                       (item.quantity || 0) <= (item.reorderLevel || lowStockThreshold) ? 'Low Stock' : 'In Stock'}
                     </span>
                   </td>
                   <td className="px-6 py-4">

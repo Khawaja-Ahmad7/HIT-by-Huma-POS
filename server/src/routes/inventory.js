@@ -13,6 +13,15 @@ router.get('/', async (req, res, next) => {
     const { locationId, search, lowStock, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
     
+    // Get low stock threshold from settings
+    const pool = db.getPool();
+    const thresholdResult = await pool.query(
+      `SELECT setting_value FROM settings WHERE setting_key = $1`,
+      ['low_stock_threshold']
+    );
+    const lowStockThreshold = parseInt(thresholdResult.rows[0]?.setting_value) || 10;
+    console.log('Using low stock threshold:', lowStockThreshold);
+    
     // Start from product_variants and LEFT JOIN to inventory so we see all variants
     // including those with no inventory record (out of stock)
     let whereClause = 'WHERE pv.is_active = true AND p.is_active = true';
@@ -35,15 +44,15 @@ router.get('/', async (req, res, next) => {
     }
     
     if (lowStock === 'true') {
-      whereClause += ' AND COALESCE(i.quantity_on_hand, 0) <= COALESCE(i.reorder_level, 5) AND COALESCE(i.quantity_on_hand, 0) > 0';
+      whereClause += ` AND COALESCE(i.quantity_on_hand, 0) <= ${lowStockThreshold} AND COALESCE(i.quantity_on_hand, 0) > 0`;
     }
     
     // Get inventory items - use LEFT JOIN to include variants without inventory records
-    const result = await db.query(
+    const result = await pool.query(
       `SELECT i.inventory_id, pv.variant_id, l.location_id, 
               COALESCE(i.quantity_on_hand, 0) as quantity_on_hand, 
               COALESCE(i.quantity_reserved, 0) as quantity_reserved, 
-              COALESCE(i.reorder_level, 5) as reorder_level, 
+              ${lowStockThreshold} as reorder_level, 
               COALESCE(i.reorder_quantity, 10) as reorder_quantity, 
               i.bin_location, i.updated_at,
               pv.sku, pv.barcode, pv.variant_name, pv.price, pv.cost_price,
@@ -59,7 +68,7 @@ router.get('/', async (req, res, next) => {
     );
     
     // Transform to frontend format
-    const inventory = result.recordset.map(item => ({
+    const inventory = (result.rows || result.recordset || []).map(item => ({
       id: item.inventory_id || `${item.variant_id}-${item.location_id}`,
       variantId: item.variant_id,
       locationId: item.location_id,
@@ -92,6 +101,9 @@ router.get('/', async (req, res, next) => {
       outOfStock: inventory.filter(item => item.quantity <= 0).length
     };
     
+    console.log('Inventory sample:', inventory.slice(0, 2).map(i => ({ name: i.productName, qty: i.quantity, reorderLevel: i.reorderLevel })));
+    console.log('Summary:', summary);
+    
     res.json({ inventory, summary });
   } catch (error) {
     next(error);
@@ -115,7 +127,7 @@ router.get('/check-other-locations/:variantId', async (req, res, next) => {
       [parseInt(variantId), parseInt(currentLocationId)]
     );
     
-    res.json({ locations: result.recordset });
+    res.json({ locations: result.rows || [] });
   } catch (error) {
     next(error);
   }
@@ -128,7 +140,7 @@ router.get('/locations', async (req, res, next) => {
       `SELECT * FROM locations WHERE is_active = true ORDER BY location_name`
     );
     // Transform to expected format
-    const locations = result.recordset.map(loc => ({
+    const locations = (result.rows || []).map(loc => ({
       LocationID: loc.location_id,
       LocationName: loc.location_name,
       ...loc
@@ -171,7 +183,7 @@ router.get('/transactions', async (req, res, next) => {
       [...params, parseInt(limit), offset]
     );
     
-    res.json({ transactions: result.recordset });
+    res.json({ transactions: result.rows || [] });
   } catch (error) {
     next(error);
   }
@@ -201,7 +213,8 @@ router.post('/adjust', async (req, res, next) => {
     
     let currentStock = 0;
     
-    if (currentResult.recordset.length === 0) {
+    const rows = currentResult.rows || currentResult.recordset || [];
+    if (rows.length === 0) {
       // Create inventory record if it doesn't exist
       console.log('Creating new inventory record');
       await db.query(
@@ -209,7 +222,7 @@ router.post('/adjust', async (req, res, next) => {
         [parseInt(variantId), parseInt(locationId)]
       );
     } else {
-      currentStock = parseInt(currentResult.recordset[0].quantity_on_hand) || 0;
+      currentStock = parseInt(rows[0].quantity_on_hand) || 0;
     }
     
     const newStock = currentStock + parseInt(adjustment);
@@ -270,13 +283,14 @@ router.post('/receive', authorize('inventory'), [
     
     let currentStock = 0;
     
-    if (currentResult.recordset.length === 0) {
+    const receiveRows = currentResult.rows || currentResult.recordset || [];
+    if (receiveRows.length === 0) {
       await db.query(
         `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES ($1, $2, $3)`,
         [variantId, locationId, quantity]
       );
     } else {
-      currentStock = currentResult.recordset[0].quantity_on_hand;
+      currentStock = receiveRows[0].quantity_on_hand;
       await db.query(
         `UPDATE inventory SET quantity_on_hand = quantity_on_hand + $1, updated_at = CURRENT_TIMESTAMP
          WHERE variant_id = $2 AND location_id = $3`,
@@ -320,7 +334,8 @@ router.post('/transfers', authorize('inventory'), async (req, res, next) => {
         [variantId, toLocationId]
       );
       
-      if (existing.recordset.length === 0) {
+      const existingRows = existing.rows || existing.recordset || [];
+      if (existingRows.length === 0) {
         await db.query(
           `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES ($1, $2, $3)`,
           [variantId, toLocationId, quantity]

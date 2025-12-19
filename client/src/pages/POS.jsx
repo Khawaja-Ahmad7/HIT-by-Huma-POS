@@ -66,20 +66,25 @@ export default function POS() {
     queryFn: () => api.get('/sales/payment-methods/list').then(res => res.data)
   });
   
-  // Transform payment methods
-  const paymentMethods = paymentMethodsData?.paymentMethods || [];
+  // Transform payment methods - handle both array and object with paymentMethods property
+  const paymentMethods = Array.isArray(paymentMethodsData) 
+    ? paymentMethodsData 
+    : (paymentMethodsData?.paymentMethods || []);
   
   const getPaymentMethodId = (type) => {
-    // Find by MethodType
-    let method = paymentMethods.find(m => m.MethodType === type);
-    // If not found, try by MethodName (case-insensitive)
+    // Find by method_type (snake_case from database)
+    let method = paymentMethods.find(m => m.method_type === type || m.MethodType === type);
+    // If not found, try by method_name (case-insensitive)
     if (!method) {
-      method = paymentMethods.find(m => m.MethodName?.toLowerCase().includes(type.toLowerCase()));
+      method = paymentMethods.find(m => 
+        m.method_name?.toLowerCase().includes(type.toLowerCase()) ||
+        m.MethodName?.toLowerCase().includes(type.toLowerCase())
+      );
     }
     // Return the ID or the first available method as fallback
-    if (method) return method.PaymentMethodID;
+    if (method) return method.payment_method_id || method.PaymentMethodID;
     // Ultimate fallback - return first method's ID if available
-    if (paymentMethods.length > 0) return paymentMethods[0].PaymentMethodID;
+    if (paymentMethods.length > 0) return paymentMethods[0].payment_method_id || paymentMethods[0].PaymentMethodID;
     return null;
   };
 
@@ -111,14 +116,16 @@ export default function POS() {
       toast.success('Sale completed successfully!');
       clearCart();
       setShowPayment(false);
-      // Trigger receipt print
-      if (response.data.transaction_id) {
+      // Trigger receipt print - server returns saleId
+      const saleId = response.data.saleId || response.data.transaction_id;
+      if (saleId) {
         api.post('/hardware/print-receipt', { 
-          transaction_id: response.data.transaction_id 
-        });
+          saleId: saleId
+        }).catch(() => {}); // Ignore print errors
       }
     },
     onError: (error) => {
+      console.error('Sale error:', error.response?.data || error);
       toast.error(error.response?.data?.message || 'Failed to process sale');
     }
   });
@@ -216,16 +223,17 @@ export default function POS() {
     
     const saleData = {
       locationId: 1, // TODO: Get from user's current location/settings
-      customerId: customer?.id || null,
+      customerId: customer?.id || customer?.customer_id || null,
       items: items.map(item => ({
         variantId: item.variantId,
         quantity: item.quantity,
-        price: item.price,
+        unitPrice: item.price,
         originalPrice: item.originalPrice || item.price,
-        discountAmount: item.discountAmount || 0
+        discountAmount: item.discountAmount || 0,
+        taxAmount: 0
       })),
       payments: [{
-        methodId: paymentMethodId,  // Server expects 'methodId' not 'paymentMethodId'
+        paymentMethodId: paymentMethodId,
         amount: totalAmount
       }],
       discountAmount: discount || 0,

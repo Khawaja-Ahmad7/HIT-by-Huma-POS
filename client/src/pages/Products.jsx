@@ -611,7 +611,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
                   </div>
                 </div>
                 <div>
-                  <label className="label">Initial Stock</label>
+                  <label className="label">Stock</label>
                   <input
                     type="number"
                     value={formData.initial_stock}

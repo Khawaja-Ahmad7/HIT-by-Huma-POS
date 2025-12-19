@@ -372,63 +372,75 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
     
     // Update stock if provided
     if (finalStock !== null && finalStock !== undefined) {
-      // Get the default variant for this product
-      const variantResult = await db.query(
-        `SELECT variant_id FROM product_variants WHERE product_id = @productId LIMIT 1`,
-        { productId: parseInt(id) }
+      const stockQty = parseInt(finalStock);
+      const locationId = req.user?.default_location_id || 1;
+      
+      console.log('Stock update requested:', { productId: id, stockQty, locationId });
+      
+      // Get the default variant for this product using pool directly
+      const pool = db.getPool();
+      const variantResult = await pool.query(
+        `SELECT variant_id FROM product_variants WHERE product_id = $1 LIMIT 1`,
+        [parseInt(id)]
       );
       
       let variantId;
       
-      if (variantResult.recordset.length > 0) {
-        variantId = variantResult.recordset[0].variant_id;
+      if (variantResult.rows.length > 0) {
+        variantId = variantResult.rows[0].variant_id;
+        console.log('Found existing variant:', variantId);
       } else {
         // Create a default variant if none exists
-        const newVariantResult = await db.query(
+        console.log('No variant found, creating default variant');
+        const newVariantResult = await pool.query(
           `INSERT INTO product_variants (product_id, sku, variant_name, price, cost_price, is_active)
-           VALUES (@productId, @sku, 'Default', @price, @costPrice, true)
+           VALUES ($1, $2, 'Default', $3, $4, true)
            RETURNING variant_id`,
-          { productId: parseInt(id), sku: p.product_code, price: p.base_price, costPrice: p.cost_price || 0 }
+          [parseInt(id), p.product_code, p.base_price, p.cost_price || 0]
         );
-        variantId = newVariantResult.recordset[0].variant_id;
+        variantId = newVariantResult.rows[0].variant_id;
+        console.log('Created new variant:', variantId);
       }
       
-      const locationId = req.user?.default_location_id || 1;
-      const stockQty = parseInt(finalStock);
-      
-      console.log('Updating stock:', { variantId, locationId, stockQty });
-      
       // Check if inventory record exists
-      const existingInventory = await db.query(
-        `SELECT inventory_id FROM inventory WHERE variant_id = @variantId AND location_id = @locationId`,
-        { variantId, locationId }
+      const existingInventory = await pool.query(
+        `SELECT inventory_id FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+        [variantId, locationId]
       );
       
-      if (existingInventory.recordset.length > 0) {
+      if (existingInventory.rows.length > 0) {
         // Update existing inventory record
-        await db.query(
-          `UPDATE inventory SET quantity_on_hand = @stockQty, updated_at = CURRENT_TIMESTAMP
-           WHERE variant_id = @variantId AND location_id = @locationId`,
-          { stockQty, variantId, locationId }
+        console.log('Updating existing inventory record');
+        await pool.query(
+          `UPDATE inventory SET quantity_on_hand = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE variant_id = $2 AND location_id = $3`,
+          [stockQty, variantId, locationId]
         );
       } else {
         // Insert new inventory record
-        await db.query(
+        console.log('Inserting new inventory record');
+        await pool.query(
           `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, updated_at)
-           VALUES (@variantId, @locationId, @stockQty, CURRENT_TIMESTAMP)`,
-          { variantId, locationId, stockQty }
+           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
+          [variantId, locationId, stockQty]
         );
       }
+      
+      console.log('Stock update completed successfully');
     }
     
     // Get updated total stock
-    const stockResult = await db.query(
+    const pool = db.getPool();
+    const stockResult = await pool.query(
       `SELECT COALESCE(SUM(i.quantity_on_hand), 0) as total_stock 
        FROM product_variants pv 
        LEFT JOIN inventory i ON pv.variant_id = i.variant_id 
-       WHERE pv.product_id = @productId`,
-      { productId: parseInt(id) }
+       WHERE pv.product_id = $1`,
+      [parseInt(id)]
     );
+    
+    const finalTotalStock = parseInt(stockResult.rows[0]?.total_stock) || 0;
+    console.log('Final total stock:', finalTotalStock);
     
     // Return transformed response matching GET format
     res.json({
@@ -441,7 +453,7 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
       costPrice: p.cost_price,
       taxRate: p.tax_rate,
       isActive: p.is_active,
-      totalStock: parseInt(stockResult.recordset[0]?.total_stock) || 0,
+      totalStock: finalTotalStock,
       updatedAt: p.updated_at
     });
   } catch (error) {

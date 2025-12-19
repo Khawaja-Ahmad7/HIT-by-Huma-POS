@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Cog6ToothIcon,
@@ -649,6 +649,69 @@ function TaxSettings() {
 
 // Notification Settings Component
 function NotificationSettings() {
+  const queryClient = useQueryClient();
+  const [lowStockThreshold, setLowStockThreshold] = useState(10);
+  const [settings, setSettings] = useState({
+    lowStockAlerts: true,
+    dailySalesSummary: true,
+    newCustomerSignup: false,
+    smsReceipts: true
+  });
+  const [initialized, setInitialized] = useState(false);
+
+  // Fetch settings
+  const { data, isLoading } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api.get('/settings').then(res => res.data),
+  });
+
+  // Update local state when data changes
+  useEffect(() => {
+    if (data && !initialized) {
+      if (data?.low_stock_threshold?.value) {
+        setLowStockThreshold(parseInt(data.low_stock_threshold.value) || 10);
+      }
+      if (data?.low_stock_alerts?.value) {
+        setSettings(prev => ({ ...prev, lowStockAlerts: data.low_stock_alerts.value === 'true' }));
+      }
+      if (data?.daily_sales_summary?.value) {
+        setSettings(prev => ({ ...prev, dailySalesSummary: data.daily_sales_summary.value === 'true' }));
+      }
+      if (data?.new_customer_signup?.value) {
+        setSettings(prev => ({ ...prev, newCustomerSignup: data.new_customer_signup.value === 'true' }));
+      }
+      if (data?.sms_receipts?.value) {
+        setSettings(prev => ({ ...prev, smsReceipts: data.sms_receipts.value === 'true' }));
+      }
+      setInitialized(true);
+    }
+  }, [data, initialized]);
+
+  const saveMutation = useMutation({
+    mutationFn: ({ key, value }) => api.put(`/settings/${key}`, { value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['settings']);
+      toast.success('Setting saved');
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Failed to save setting');
+    }
+  });
+
+  const handleThresholdChange = (e) => {
+    setLowStockThreshold(e.target.value);
+  };
+
+  const saveThreshold = () => {
+    saveMutation.mutate({ key: 'low_stock_threshold', value: lowStockThreshold });
+  };
+
+  const handleToggle = (key, settingKey) => {
+    const newValue = !settings[key];
+    setSettings(prev => ({ ...prev, [key]: newValue }));
+    saveMutation.mutate({ key: settingKey, value: String(newValue) });
+  };
+
   return (
     <div className="bg-white rounded-xl p-6 border">
       <h2 className="text-lg font-semibold mb-6">Notification Preferences</h2>
@@ -659,7 +722,7 @@ function NotificationSettings() {
             <p className="font-medium">Low Stock Alerts</p>
             <p className="text-sm text-gray-500">Get notified when items are running low</p>
           </div>
-          <Toggle defaultChecked />
+          <Toggle checked={settings.lowStockAlerts} onChange={() => handleToggle('lowStockAlerts', 'low_stock_alerts')} />
         </div>
 
         <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
@@ -667,7 +730,7 @@ function NotificationSettings() {
             <p className="font-medium">Daily Sales Summary</p>
             <p className="text-sm text-gray-500">Email end-of-day sales report</p>
           </div>
-          <Toggle defaultChecked />
+          <Toggle checked={settings.dailySalesSummary} onChange={() => handleToggle('dailySalesSummary', 'daily_sales_summary')} />
         </div>
 
         <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
@@ -675,7 +738,7 @@ function NotificationSettings() {
             <p className="font-medium">New Customer Signup</p>
             <p className="text-sm text-gray-500">Alert when new customers register</p>
           </div>
-          <Toggle />
+          <Toggle checked={settings.newCustomerSignup} onChange={() => handleToggle('newCustomerSignup', 'new_customer_signup')} />
         </div>
 
         <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
@@ -683,16 +746,26 @@ function NotificationSettings() {
             <p className="font-medium">Customer SMS Receipts</p>
             <p className="text-sm text-gray-500">Allow sending receipts via SMS</p>
           </div>
-          <Toggle defaultChecked />
+          <Toggle checked={settings.smsReceipts} onChange={() => handleToggle('smsReceipts', 'sms_receipts')} />
         </div>
 
         <div className="mt-4">
           <label className="label">Low Stock Threshold</label>
-          <input
-            type="number"
-            placeholder="10"
-            className="input max-w-[200px]"
-          />
+          <div className="flex gap-2">
+            <input
+              type="number"
+              value={lowStockThreshold}
+              onChange={handleThresholdChange}
+              className="input max-w-[200px]"
+            />
+            <button 
+              onClick={saveThreshold}
+              disabled={saveMutation.isLoading}
+              className="btn btn-primary"
+            >
+              {saveMutation.isLoading ? 'Saving...' : 'Save'}
+            </button>
+          </div>
           <p className="text-sm text-gray-500 mt-1">
             Alert when stock falls below this number
           </p>
@@ -837,11 +910,17 @@ function SecuritySettings() {
 }
 
 // Toggle Component
-function Toggle({ defaultChecked = false, onChange }) {
-  const [checked, setChecked] = useState(defaultChecked);
+function Toggle({ defaultChecked = false, checked: controlledChecked, onChange }) {
+  const [internalChecked, setInternalChecked] = useState(defaultChecked);
+  
+  // Use controlled value if provided, otherwise use internal state
+  const isControlled = controlledChecked !== undefined;
+  const checked = isControlled ? controlledChecked : internalChecked;
 
   const handleToggle = () => {
-    setChecked(!checked);
+    if (!isControlled) {
+      setInternalChecked(!checked);
+    }
     onChange?.(!checked);
   };
 

@@ -3,9 +3,6 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://your-backend-url.com/api/:path*"
-    }
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ]
 }

@@ -14,29 +14,34 @@ router.get('/', async (req, res, next) => {
     const offset = (page - 1) * limit;
     
     let whereClause = 'WHERE 1=1';
-    const params = { limit: parseInt(limit), offset };
+    const queryParams = [];
+    let paramIndex = 1;
     
     if (locationId) {
-      whereClause += ' AND s.location_id = @locationId';
-      params.locationId = parseInt(locationId);
+      whereClause += ` AND s.location_id = $${paramIndex++}`;
+      queryParams.push(parseInt(locationId));
     }
     
     if (startDate) {
-      whereClause += ' AND s.created_at >= @startDate';
-      params.startDate = startDate;
+      whereClause += ` AND s.created_at >= $${paramIndex++}`;
+      queryParams.push(startDate);
     }
     
     if (endDate) {
-      whereClause += ' AND s.created_at <= @endDate';
-      params.endDate = endDate;
+      whereClause += ` AND s.created_at <= $${paramIndex++}`;
+      queryParams.push(endDate);
     }
     
     if (status) {
-      whereClause += ' AND s.status = @status';
-      params.status = status;
+      whereClause += ` AND s.status = $${paramIndex++}`;
+      queryParams.push(status);
     }
     
-    const result = await db.query(
+    queryParams.push(parseInt(limit));
+    queryParams.push(offset);
+    
+    const pool = db.getPool();
+    const result = await pool.query(
       `SELECT s.*, u.first_name as cashier_first_name, u.last_name as cashier_last_name,
               c.first_name as customer_first_name, c.last_name as customer_last_name, c.phone as customer_phone,
               l.location_name
@@ -46,11 +51,11 @@ router.get('/', async (req, res, next) => {
        INNER JOIN locations l ON s.location_id = l.location_id
        ${whereClause}
        ORDER BY s.created_at DESC
-       LIMIT @limit OFFSET @offset`,
-      params
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      queryParams
     );
     
-    res.json({ sales: result.recordset });
+    res.json({ sales: result.rows });
   } catch (error) {
     next(error);
   }
@@ -60,8 +65,9 @@ router.get('/', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
+    const pool = db.getPool();
     
-    const saleResult = await db.query(
+    const saleResult = await pool.query(
       `SELECT s.*, u.first_name as cashier_first_name, u.last_name as cashier_last_name,
               c.first_name as customer_first_name, c.last_name as customer_last_name, c.phone as customer_phone,
               l.location_name, l.address as location_address, l.phone as location_phone
@@ -69,35 +75,35 @@ router.get('/:id', async (req, res, next) => {
        INNER JOIN users u ON s.user_id = u.user_id
        LEFT JOIN customers c ON s.customer_id = c.customer_id
        INNER JOIN locations l ON s.location_id = l.location_id
-       WHERE s.sale_id = @id`,
-      { id: parseInt(id) }
+       WHERE s.sale_id = $1`,
+      [parseInt(id)]
     );
     
-    if (saleResult.recordset.length === 0) {
+    if (saleResult.rows.length === 0) {
       throw new NotFoundError('Sale not found');
     }
     
-    const itemsResult = await db.query(
+    const itemsResult = await pool.query(
       `SELECT si.*, pv.sku, pv.variant_name, p.product_name
        FROM sale_items si
        INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
        INNER JOIN products p ON pv.product_id = p.product_id
-       WHERE si.sale_id = @id`,
-      { id: parseInt(id) }
+       WHERE si.sale_id = $1`,
+      [parseInt(id)]
     );
     
-    const paymentsResult = await db.query(
+    const paymentsResult = await pool.query(
       `SELECT sp.*, pm.method_name
        FROM sale_payments sp
        INNER JOIN payment_methods pm ON sp.payment_method_id = pm.payment_method_id
-       WHERE sp.sale_id = @id`,
-      { id: parseInt(id) }
+       WHERE sp.sale_id = $1`,
+      [parseInt(id)]
     );
     
     res.json({
-      sale: saleResult.recordset[0],
-      items: itemsResult.recordset,
-      payments: paymentsResult.recordset
+      sale: saleResult.rows[0],
+      items: itemsResult.rows,
+      payments: paymentsResult.rows
     });
   } catch (error) {
     next(error);
@@ -107,10 +113,11 @@ router.get('/:id', async (req, res, next) => {
 // Get payment methods
 router.get('/payment-methods/list', async (req, res, next) => {
   try {
-    const result = await db.query(
+    const pool = db.getPool();
+    const result = await pool.query(
       `SELECT * FROM payment_methods WHERE is_active = true ORDER BY sort_order`
     );
-    res.json(result.recordset);
+    res.json(result.rows);
   } catch (error) {
     next(error);
   }
@@ -145,78 +152,57 @@ router.post('/', [
     // Generate sale number
     const saleNumber = `S-${Date.now()}`;
     
+    // Use pool directly for PostgreSQL
+    const pool = db.getPool();
+    
     // Insert sale
-    const saleResult = await db.query(
+    const saleResult = await pool.query(
       `INSERT INTO sales (sale_number, location_id, shift_id, user_id, customer_id, subtotal, tax_amount, discount_amount, discount_type, discount_reason, total_amount, notes)
-       VALUES (@saleNumber, @locationId, @shiftId, @userId, @customerId, @subtotal, @taxAmount, @discountAmount, @discountType, @discountReason, @totalAmount, @notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING sale_id`,
-      { 
-        saleNumber,
-        locationId,
-        shiftId: shiftId || null,
-        userId: req.user.user_id,
-        customerId: customerId || null,
-        subtotal,
-        taxAmount,
-        discountAmount: discountAmount || 0,
-        discountType: discountType || null,
-        discountReason: discountReason || null,
-        totalAmount,
-        notes: notes || null
-      }
+      [saleNumber, locationId, shiftId || null, req.user.user_id, customerId || null, subtotal, taxAmount, discountAmount || 0, discountType || null, discountReason || null, totalAmount, notes || null]
     );
     
-    const saleId = saleResult.recordset[0].sale_id;
+    const saleId = saleResult.rows[0].sale_id;
     
     // Insert sale items and update inventory
     for (const item of items) {
-      await db.query(
+      await pool.query(
         `INSERT INTO sale_items (sale_id, variant_id, quantity, unit_price, discount_amount, tax_amount, line_total)
-         VALUES (@saleId, @variantId, @quantity, @unitPrice, @discountAmount, @taxAmount, @lineTotal)`,
-        { 
-          saleId,
-          variantId: item.variantId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountAmount: item.discountAmount || 0,
-          taxAmount: item.taxAmount || 0,
-          lineTotal: item.unitPrice * item.quantity
-        }
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [saleId, item.variantId, item.quantity, item.unitPrice, item.discountAmount || 0, item.taxAmount || 0, item.unitPrice * item.quantity]
       );
       
       // Update inventory
-      await db.query(
-        `UPDATE inventory SET quantity_on_hand = quantity_on_hand - @quantity, updated_at = CURRENT_TIMESTAMP
-         WHERE variant_id = @variantId AND location_id = @locationId`,
-        { quantity: item.quantity, variantId: item.variantId, locationId }
+      await pool.query(
+        `UPDATE inventory SET quantity_on_hand = quantity_on_hand - $1, updated_at = CURRENT_TIMESTAMP
+         WHERE variant_id = $2 AND location_id = $3`,
+        [item.quantity, item.variantId, locationId]
       );
       
       // Log inventory transaction
-      await db.query(
+      await pool.query(
         `INSERT INTO inventory_transactions (variant_id, location_id, transaction_type, quantity_change, quantity_before, quantity_after, reference_type, reference_id, user_id)
-         SELECT @variantId, @locationId, 'SALE', @quantity, quantity_on_hand + @quantity, quantity_on_hand, 'SALE', @saleId, @userId
-         FROM inventory WHERE variant_id = @variantId AND location_id = @locationId`,
-        { variantId: item.variantId, locationId, quantity: -item.quantity, saleId, userId: req.user.user_id }
+         SELECT $1, $2, 'SALE', $3, quantity_on_hand + $4, quantity_on_hand, 'SALE', $5, $6
+         FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+        [item.variantId, locationId, -item.quantity, item.quantity, saleId, req.user.user_id]
       );
     }
     
     // Insert payments
     for (const payment of payments) {
-      await db.query(
+      await pool.query(
         `INSERT INTO sale_payments (sale_id, payment_method_id, amount, reference_number)
-         VALUES (@saleId, @paymentMethodId, @amount, @reference)`,
-        { 
-          saleId,
-          paymentMethodId: payment.paymentMethodId,
-          amount: payment.amount,
-          reference: payment.referenceNumber || null
-        }
+         VALUES ($1, $2, $3, $4)`,
+        [saleId, payment.paymentMethodId, payment.amount, payment.referenceNumber || null]
       );
     }
     
     // Emit socket event
     const io = req.app.get('io');
-    io.to(`location-${locationId}`).emit('sale-completed', { saleId, saleNumber, totalAmount });
+    if (io) {
+      io.to(`location-${locationId}`).emit('sale-completed', { saleId, saleNumber, totalAmount });
+    }
     
     res.status(201).json({ 
       success: true, 
@@ -225,6 +211,7 @@ router.post('/', [
       totalAmount 
     });
   } catch (error) {
+    console.error('Sale error:', error);
     next(error);
   }
 });
@@ -233,21 +220,16 @@ router.post('/', [
 router.post('/park', async (req, res, next) => {
   try {
     const { locationId, customerId, cartData, notes } = req.body;
+    const pool = db.getPool();
     
-    const result = await db.query(
+    const result = await pool.query(
       `INSERT INTO parked_sales (location_id, user_id, customer_id, cart_data, notes)
-       VALUES (@locationId, @userId, @customerId, @cartData, @notes)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING parked_id`,
-      { 
-        locationId, 
-        userId: req.user.user_id, 
-        customerId: customerId || null, 
-        cartData: JSON.stringify(cartData),
-        notes: notes || null
-      }
+      [locationId, req.user.user_id, customerId || null, JSON.stringify(cartData), notes || null]
     );
     
-    res.json({ success: true, parkedId: result.recordset[0].parked_id });
+    res.json({ success: true, parkedId: result.rows[0].parked_id });
   } catch (error) {
     next(error);
   }
@@ -257,18 +239,19 @@ router.post('/park', async (req, res, next) => {
 router.get('/parked/list', async (req, res, next) => {
   try {
     const { locationId } = req.query;
+    const pool = db.getPool();
     
-    const result = await db.query(
+    const result = await pool.query(
       `SELECT ps.*, u.first_name, u.last_name, c.phone as customer_phone
        FROM parked_sales ps
        LEFT JOIN users u ON ps.user_id = u.user_id
        LEFT JOIN customers c ON ps.customer_id = c.customer_id
-       WHERE ps.location_id = @locationId
+       WHERE ps.location_id = $1
        ORDER BY ps.created_at DESC`,
-      { locationId: parseInt(locationId) }
+      [parseInt(locationId)]
     );
     
-    res.json(result.recordset);
+    res.json(result.rows);
   } catch (error) {
     next(error);
   }
@@ -278,17 +261,18 @@ router.get('/parked/list', async (req, res, next) => {
 router.get('/parked/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
+    const pool = db.getPool();
     
-    const result = await db.query(
-      `SELECT * FROM parked_sales WHERE parked_id = @id`,
-      { id: parseInt(id) }
+    const result = await pool.query(
+      `SELECT * FROM parked_sales WHERE parked_id = $1`,
+      [parseInt(id)]
     );
     
-    if (result.recordset.length === 0) {
+    if (result.rows.length === 0) {
       throw new NotFoundError('Parked sale not found');
     }
     
-    res.json(result.recordset[0]);
+    res.json(result.rows[0]);
   } catch (error) {
     next(error);
   }
@@ -298,8 +282,9 @@ router.get('/parked/:id', async (req, res, next) => {
 router.delete('/parked/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
+    const pool = db.getPool();
     
-    await db.query(`DELETE FROM parked_sales WHERE parked_id = @id`, { id: parseInt(id) });
+    await pool.query(`DELETE FROM parked_sales WHERE parked_id = $1`, [parseInt(id)]);
     
     res.json({ success: true });
   } catch (error) {
@@ -312,29 +297,30 @@ router.post('/:id/void', authorize('void'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { managerPIN, reason } = req.body;
+    const pool = db.getPool();
     
     // Get sale items to restore inventory
-    const itemsResult = await db.query(
+    const itemsResult = await pool.query(
       `SELECT si.*, s.location_id FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       WHERE si.sale_id = @id`,
-      { id: parseInt(id) }
+       WHERE si.sale_id = $1`,
+      [parseInt(id)]
     );
     
     // Restore inventory
-    for (const item of itemsResult.recordset) {
-      await db.query(
-        `UPDATE inventory SET quantity_on_hand = quantity_on_hand + @quantity
-         WHERE variant_id = @variantId AND location_id = @locationId`,
-        { quantity: item.quantity, variantId: item.variant_id, locationId: item.location_id }
+    for (const item of itemsResult.rows) {
+      await pool.query(
+        `UPDATE inventory SET quantity_on_hand = quantity_on_hand + $1
+         WHERE variant_id = $2 AND location_id = $3`,
+        [item.quantity, item.variant_id, item.location_id]
       );
     }
     
     // Update sale status
-    await db.query(
-      `UPDATE sales SET status = 'voided', voided_by = @voidedBy, voided_at = CURRENT_TIMESTAMP, void_reason = @reason
-       WHERE sale_id = @id`,
-      { id: parseInt(id), voidedBy: req.user.user_id, reason }
+    await pool.query(
+      `UPDATE sales SET status = 'voided', voided_by = $1, voided_at = CURRENT_TIMESTAMP, void_reason = $2
+       WHERE sale_id = $3`,
+      [req.user.user_id, reason, parseInt(id)]
     );
     
     res.json({ success: true });
@@ -347,14 +333,15 @@ router.post('/:id/void', authorize('void'), async (req, res, next) => {
 router.post('/apply-discount', async (req, res, next) => {
   try {
     const { discountPercent, discountAmount, subtotal } = req.body;
+    const pool = db.getPool();
     
     // Get max discount setting
-    const settingResult = await db.query(
+    const settingResult = await pool.query(
       `SELECT setting_value FROM settings WHERE setting_key = 'max_discount_without_approval'`
     );
     
-    const maxDiscount = settingResult.recordset.length > 0 
-      ? parseFloat(settingResult.recordset[0].setting_value) 
+    const maxDiscount = settingResult.rows.length > 0 
+      ? parseFloat(settingResult.rows[0].setting_value) 
       : 10;
     
     const actualPercent = discountPercent || (discountAmount / subtotal * 100);

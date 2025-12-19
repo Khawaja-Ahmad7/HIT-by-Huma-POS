@@ -17,7 +17,8 @@ router.get('/', async (req, res, next) => {
     
     // Convert to key-value object
     const settings = {};
-    result.recordset.forEach(s => {
+    const rows = result.rows || result.recordset || [];
+    rows.forEach(s => {
       settings[s.setting_key] = {
         value: s.setting_value,
         type: s.setting_type,
@@ -37,16 +38,18 @@ router.get('/:key', async (req, res, next) => {
   try {
     const { key } = req.params;
     
-    const result = await db.query(
-      `SELECT * FROM settings WHERE setting_key = @key`,
-      { key }
+    // Use pool directly for positional parameters
+    const pool = db.getPool();
+    const result = await pool.query(
+      `SELECT * FROM settings WHERE setting_key = $1`,
+      [key]
     );
     
-    if (result.recordset.length === 0) {
+    if (result.rows.length === 0) {
       throw new NotFoundError('Setting not found');
     }
     
-    res.json(result.recordset[0]);
+    res.json(result.rows[0]);
   } catch (error) {
     next(error);
   }
@@ -58,21 +61,26 @@ router.put('/:key', authorize('settings'), async (req, res, next) => {
     const { key } = req.params;
     const { value } = req.body;
     
-    const result = await db.query(
-      `UPDATE settings SET setting_value = @value, updated_by = @userId, updated_at = CURRENT_TIMESTAMP
-       WHERE setting_key = @key
+    // Use pool directly for positional parameters
+    const pool = db.getPool();
+    
+    // Try to update first
+    const updateResult = await pool.query(
+      `UPDATE settings SET setting_value = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE setting_key = $3
        RETURNING *`,
-      { key, value: String(value), userId: req.user.user_id }
+      [String(value), req.user.user_id, key]
     );
     
-    if (result.recordset.length === 0) {
+    if (updateResult.rows.length === 0) {
       // Insert if not exists
-      await db.query(
-        `INSERT INTO settings (setting_key, setting_value, updated_by) VALUES (@key, @value, @userId)`,
-        { key, value: String(value), userId: req.user.user_id }
+      await pool.query(
+        `INSERT INTO settings (setting_key, setting_value, updated_by) VALUES ($1, $2, $3)`,
+        [key, String(value), req.user.user_id]
       );
     }
     
+    console.log('Setting updated:', { key, value, userId: req.user.user_id });
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -85,7 +93,7 @@ router.get('/locations/all', async (req, res, next) => {
     const result = await db.query(
       `SELECT * FROM locations ORDER BY location_name`
     );
-    res.json(result.recordset);
+    res.json(result.rows || []);
   } catch (error) {
     next(error);
   }
@@ -106,12 +114,13 @@ router.post('/locations', authorize('settings'), [
     
     const result = await db.query(
       `INSERT INTO locations (location_code, location_name, address, city, phone, email)
-       VALUES (@locationCode, @locationName, @address, @city, @phone, @email)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      { locationCode, locationName, address: address || null, city: city || null, phone: phone || null, email: email || null }
+      [locationCode, locationName, address || null, city || null, phone || null, email || null]
     );
     
-    res.status(201).json(result.recordset[0]);
+    const rows = result.rows || result.recordset || [];
+    res.status(201).json(rows[0]);
   } catch (error) {
     next(error);
   }
@@ -129,7 +138,7 @@ router.get('/users/all', authorize('settings'), async (req, res, next) => {
        LEFT JOIN locations l ON u.default_location_id = l.location_id
        ORDER BY u.first_name`
     );
-    res.json(result.recordset);
+    res.json(result.rows || []);
   } catch (error) {
     next(error);
   }
@@ -151,11 +160,12 @@ router.post('/users', authorize('settings'), [
     
     // Check if employee code already exists
     const existing = await db.query(
-      `SELECT user_id FROM users WHERE employee_code = @employeeCode`,
-      { employeeCode }
+      `SELECT user_id FROM users WHERE employee_code = $1`,
+      [employeeCode]
     );
     
-    if (existing.recordset.length > 0) {
+    const existingRows = existing.rows || existing.recordset || [];
+    if (existingRows.length > 0) {
       throw new ValidationError('Employee code already exists');
     }
     
@@ -163,21 +173,13 @@ router.post('/users', authorize('settings'), [
     
     const result = await db.query(
       `INSERT INTO users (employee_code, email, password_hash, first_name, last_name, phone, role_id, default_location_id)
-       VALUES (@employeeCode, @email, @password, @firstName, @lastName, @phone, @roleId, @locationId)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING user_id, employee_code, email, first_name, last_name`,
-      { 
-        employeeCode, 
-        email: email || null, 
-        password: hashedPassword, 
-        firstName, 
-        lastName: lastName || null, 
-        phone: phone || null, 
-        roleId: roleId || 3, // Default to cashier
-        locationId: locationId || 1 
-      }
+      [employeeCode, email || null, hashedPassword, firstName, lastName || null, phone || null, roleId || 3, locationId || 1]
     );
     
-    res.status(201).json(result.recordset[0]);
+    const rows = result.rows || result.recordset || [];
+    res.status(201).json(rows[0]);
   } catch (error) {
     next(error);
   }
@@ -189,7 +191,7 @@ router.get('/roles/all', async (req, res, next) => {
     const result = await db.query(
       `SELECT * FROM roles WHERE is_active = true ORDER BY role_name`
     );
-    res.json(result.recordset);
+    res.json(result.rows || []);
   } catch (error) {
     next(error);
   }
