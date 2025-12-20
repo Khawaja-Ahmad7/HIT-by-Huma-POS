@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   PlusIcon,
@@ -12,7 +12,8 @@ import {
   XMarkIcon,
   PhotoIcon,
   DocumentDuplicateIcon,
-  TagIcon
+  TagIcon,
+  PrinterIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -81,6 +82,120 @@ export default function Products() {
   const handleDelete = (product) => {
     if (confirm(`Delete "${product.name}"? This action cannot be undone.`)) {
       deleteMutation.mutate(product.id);
+    }
+  };
+
+  const handlePrintLabel = (product) => {
+    const barcode = product.barcode || product.code;
+    if (!barcode) {
+      toast.error('Product has no barcode. Edit product to generate one.');
+      return;
+    }
+    
+    // Ask for quantity and printer type
+    const quantity = prompt('How many labels to print?', '1');
+    if (!quantity) return;
+    
+    const useLabelPrinter = confirm('Use label printer?\n\nClick OK for Label Printer (small labels)\nClick Cancel for Regular Printer (A4 sheet)');
+    
+    printProductLabels({
+      name: product.name,
+      barcode: barcode,
+      price: product.basePrice || product.price
+    }, parseInt(quantity) || 1, useLabelPrinter);
+  };
+
+  const printProductLabels = (productData, quantity, useLabelPrinter) => {
+    const labelHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Product Labels - ${productData.name}</title>
+        <style>
+          @page {
+            size: ${useLabelPrinter ? '50mm 30mm' : 'A4'};
+            margin: ${useLabelPrinter ? '2mm' : '10mm'};
+          }
+          body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+          }
+          .label-container {
+            display: ${useLabelPrinter ? 'block' : 'flex'};
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: ${useLabelPrinter ? '0' : '10px'};
+          }
+          .label {
+            width: ${useLabelPrinter ? '46mm' : '60mm'};
+            height: ${useLabelPrinter ? '26mm' : '35mm'};
+            border: ${useLabelPrinter ? 'none' : '1px dashed #ccc'};
+            padding: 3mm;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            page-break-after: ${useLabelPrinter ? 'always' : 'avoid'};
+            break-inside: avoid;
+          }
+          .product-name {
+            font-size: ${useLabelPrinter ? '8pt' : '10pt'};
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 2mm;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .barcode {
+            font-family: 'Libre Barcode 39', 'Free 3 of 9', monospace;
+            font-size: ${useLabelPrinter ? '24pt' : '32pt'};
+            letter-spacing: 2px;
+          }
+          .barcode-text {
+            font-size: ${useLabelPrinter ? '7pt' : '9pt'};
+            margin-top: 1mm;
+          }
+          .price {
+            font-size: ${useLabelPrinter ? '10pt' : '12pt'};
+            font-weight: bold;
+            margin-top: 1mm;
+          }
+        </style>
+        <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39&display=swap" rel="stylesheet">
+      </head>
+      <body>
+        <div class="label-container">
+          ${Array(quantity).fill(`
+            <div class="label">
+              <div class="product-name">${productData.name}</div>
+              <div class="barcode">*${productData.barcode}*</div>
+              <div class="barcode-text">${productData.barcode}</div>
+              <div class="price">Rs. ${parseFloat(productData.price || 0).toFixed(2)}</div>
+            </div>
+          `).join('')}
+        </div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 500);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank', 'width=400,height=300');
+    if (printWindow) {
+      printWindow.document.write(labelHTML);
+      printWindow.document.close();
+    } else {
+      toast.error('Please allow popups to print labels');
     }
   };
 
@@ -248,6 +363,13 @@ export default function Products() {
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
                         <button
+                          onClick={() => handlePrintLabel(product)}
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded-lg"
+                          title="Print Labels"
+                        >
+                          <PrinterIcon className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => handleEdit(product)}
                           className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg"
                           title="Edit"
@@ -367,6 +489,133 @@ function ProductModal({ product, categories, onClose, onSave }) {
   const [variants, setVariants] = useState(product?.variants || []);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('basic');
+  const [showLabelModal, setShowLabelModal] = useState(false);
+  const [createdProduct, setCreatedProduct] = useState(null);
+  const [labelQuantity, setLabelQuantity] = useState(1);
+
+  // Auto-generate barcode when SKU changes (for new products only)
+  useEffect(() => {
+    if (!product && formData.sku && !formData.barcode) {
+      // Generate barcode from SKU - use numeric format for standard barcode scanners
+      const barcodeValue = generateBarcodeFromSKU(formData.sku);
+      setFormData(prev => ({ ...prev, barcode: barcodeValue }));
+    }
+  }, [formData.sku, product]);
+
+  const generateBarcodeFromSKU = (sku) => {
+    // Generate a numeric barcode: timestamp + hash of SKU
+    // This creates a unique 13-digit EAN-like barcode
+    const timestamp = Date.now().toString().slice(-7);
+    let hash = 0;
+    for (let i = 0; i < sku.length; i++) {
+      hash = ((hash << 5) - hash) + sku.charCodeAt(i);
+      hash = hash & hash;
+    }
+    const hashStr = Math.abs(hash).toString().padStart(6, '0').slice(0, 6);
+    return timestamp + hashStr;
+  };
+
+  const printLabels = async (productData, quantity = 1, useLabelPrinter = true) => {
+    const barcode = productData.barcode || productData.sku;
+    const name = productData.name;
+    const price = productData.price;
+    
+    // Create label HTML
+    const labelHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Product Labels</title>
+        <style>
+          @page {
+            size: ${useLabelPrinter ? '50mm 30mm' : 'A4'};
+            margin: ${useLabelPrinter ? '2mm' : '10mm'};
+          }
+          body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+          }
+          .label-container {
+            display: ${useLabelPrinter ? 'block' : 'flex'};
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: ${useLabelPrinter ? '0' : '10px'};
+          }
+          .label {
+            width: ${useLabelPrinter ? '46mm' : '60mm'};
+            height: ${useLabelPrinter ? '26mm' : '35mm'};
+            border: ${useLabelPrinter ? 'none' : '1px dashed #ccc'};
+            padding: 3mm;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            page-break-after: ${useLabelPrinter ? 'always' : 'avoid'};
+            break-inside: avoid;
+          }
+          .product-name {
+            font-size: ${useLabelPrinter ? '8pt' : '10pt'};
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 2mm;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .barcode {
+            font-family: 'Libre Barcode 39', 'Free 3 of 9', monospace;
+            font-size: ${useLabelPrinter ? '24pt' : '32pt'};
+            letter-spacing: 2px;
+          }
+          .barcode-text {
+            font-size: ${useLabelPrinter ? '7pt' : '9pt'};
+            margin-top: 1mm;
+          }
+          .price {
+            font-size: ${useLabelPrinter ? '10pt' : '12pt'};
+            font-weight: bold;
+            margin-top: 1mm;
+          }
+          @media print {
+            .no-print { display: none; }
+          }
+        </style>
+        <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39&display=swap" rel="stylesheet">
+      </head>
+      <body>
+        <div class="label-container">
+          ${Array(quantity).fill(`
+            <div class="label">
+              <div class="product-name">${name}</div>
+              <div class="barcode">*${barcode}*</div>
+              <div class="barcode-text">${barcode}</div>
+              <div class="price">Rs. ${parseFloat(price).toFixed(2)}</div>
+            </div>
+          `).join('')}
+        </div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 500);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank', 'width=400,height=300');
+    if (printWindow) {
+      printWindow.document.write(labelHTML);
+      printWindow.document.close();
+    } else {
+      toast.error('Please allow popups to print labels');
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -397,15 +646,28 @@ function ProductModal({ product, categories, onClose, onSave }) {
         payload.categoryId = parseInt(formData.category_id);
       }
 
+      let savedProduct;
       if (product) {
         await api.put(`/products/${product.id}`, payload);
         toast.success('Product updated successfully');
+        savedProduct = { ...payload, id: product.id };
       } else {
         // For new products, use initialStock
         payload.initialStock = payload.stock;
         delete payload.stock;
-        await api.post('/products', payload);
+        const response = await api.post('/products', payload);
         toast.success('Product created successfully');
+        savedProduct = { ...payload, id: response.data?.productId };
+        
+        // Show label printing modal for new products
+        setCreatedProduct({
+          name: formData.name,
+          barcode: formData.barcode || formData.sku,
+          price: formData.price
+        });
+        setShowLabelModal(true);
+        setLoading(false);
+        return; // Don't close yet, wait for label decision
       }
       
       // Force refresh the products list
@@ -418,11 +680,37 @@ function ProductModal({ product, categories, onClose, onSave }) {
     }
   };
 
+  const handleLabelPrint = async (useLabelPrinter) => {
+    if (createdProduct) {
+      await printLabels(createdProduct, labelQuantity, useLabelPrinter);
+    }
+    setShowLabelModal(false);
+    await queryClient.invalidateQueries({ queryKey: ['products'] });
+    onSave();
+  };
+
+  const handleSkipLabels = async () => {
+    setShowLabelModal(false);
+    await queryClient.invalidateQueries({ queryKey: ['products'] });
+    onSave();
+  };
+
   const generateSKU = () => {
     const prefix = formData.category_id ? 
       categories?.find(c => c.id === parseInt(formData.category_id))?.name?.substring(0, 3).toUpperCase() : 'PRD';
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setFormData({ ...formData, sku: `${prefix}-${random}` });
+    const newSku = `${prefix}-${random}`;
+    setFormData({ ...formData, sku: newSku, barcode: generateBarcodeFromSKU(newSku) });
+  };
+
+  const regenerateBarcode = () => {
+    if (formData.sku) {
+      const newBarcode = generateBarcodeFromSKU(formData.sku);
+      setFormData({ ...formData, barcode: newBarcode });
+      toast.success('Barcode regenerated');
+    } else {
+      toast.error('Enter SKU first to generate barcode');
+    }
   };
 
   const addVariant = () => {
@@ -537,14 +825,29 @@ function ProductModal({ product, categories, onClose, onSave }) {
                   </div>
                 </div>
                 <div>
-                  <label className="label">Barcode</label>
-                  <input
-                    type="text"
-                    value={formData.barcode}
-                    onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                    placeholder="Barcode (optional)"
-                    className="input"
-                  />
+                  <label className="label">Barcode (Auto-generated)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={formData.barcode}
+                      onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                      placeholder="Auto-generated from SKU"
+                      className="input flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={regenerateBarcode}
+                      className="btn btn-secondary"
+                      title="Regenerate Barcode"
+                    >
+                      <QrCodeIcon className="w-5 h-5" />
+                    </button>
+                  </div>
+                  {formData.barcode && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Barcode: {formData.barcode}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -770,6 +1073,66 @@ function ProductModal({ product, categories, onClose, onSave }) {
             {loading ? 'Saving...' : (product ? 'Update Product' : 'Create Product')}
           </button>
         </div>
+
+        {/* Label Printing Modal */}
+        {showLabelModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+            <div className="bg-white rounded-2xl w-full max-w-md p-6">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <PrinterIcon className="w-8 h-8 text-green-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900">Product Created!</h3>
+                <p className="text-gray-500 mt-2">Would you like to print labels for this product?</p>
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                <div className="text-center">
+                  <p className="font-medium text-gray-900">{createdProduct?.name}</p>
+                  <p className="text-2xl font-mono mt-2 tracking-wider">{createdProduct?.barcode}</p>
+                  <p className="text-lg font-semibold text-primary-600 mt-1">
+                    Rs. {parseFloat(createdProduct?.price || 0).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="label">Number of Labels</label>
+                <input
+                  type="number"
+                  value={labelQuantity}
+                  onChange={(e) => setLabelQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                  min="1"
+                  max="100"
+                  className="input text-center text-lg"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  onClick={() => handleLabelPrint(true)}
+                  className="w-full btn-primary flex items-center justify-center gap-2"
+                >
+                  <PrinterIcon className="w-5 h-5" />
+                  Print with Label Printer
+                </button>
+                <button
+                  onClick={() => handleLabelPrint(false)}
+                  className="w-full btn btn-secondary flex items-center justify-center gap-2"
+                >
+                  <PrinterIcon className="w-5 h-5" />
+                  Print on Regular Printer (A4)
+                </button>
+                <button
+                  onClick={handleSkipLabels}
+                  className="w-full text-gray-500 hover:text-gray-700 py-2"
+                >
+                  Skip - Don't Print Labels
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

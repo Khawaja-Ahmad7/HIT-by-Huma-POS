@@ -22,7 +22,8 @@ router.get('/dashboard', async (req, res, next) => {
 
     // Build time filter based on range or explicit start/end dates
     // timeFilter contains SQL fragment starting with ' AND '
-    let timeFilter = ` AND DATE(created_at) = CURRENT_DATE`;
+    // Default to this week's data when no explicit range is provided
+    let timeFilter = ` AND created_at >= date_trunc('week', CURRENT_DATE)`;
     if (startDate) {
       timeFilter = ` AND created_at >= $${paramIndex++}`;
       params.push(startDate);

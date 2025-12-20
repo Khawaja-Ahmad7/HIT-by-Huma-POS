@@ -840,8 +840,156 @@ function UserSettings() {
           </div>
         )}
       </div>
+
+      {/* Add User Modal */}
+      {showAddUser && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl w-full max-w-md p-8 relative">
+            <button
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+              onClick={() => setShowAddUser(false)}
+            >
+              <XMarkIcon className="w-6 h-6" />
+            </button>
+            <h3 className="text-lg font-semibold mb-4">Add New User</h3>
+            <AddUserForm onSuccess={() => setShowAddUser(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
+// Add User Form Component
+function AddUserForm({ onSuccess }) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({
+    employee_code: '',
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    password: '',
+    role_id: 3, // default to cashier
+    location_id: 1
+  });
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.post('/settings/users', form);
+      toast.success('User created successfully');
+      queryClient.invalidateQueries(['users']);
+      onSuccess();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to create user');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label className="label">Employee Code *</label>
+        <input
+          name="employee_code"
+          value={form.employee_code}
+          onChange={handleChange}
+          className="input"
+          required
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="label">First Name *</label>
+          <input
+            name="first_name"
+            value={form.first_name}
+            onChange={handleChange}
+            className="input"
+            required
+          />
+        </div>
+        <div>
+          <label className="label">Last Name</label>
+          <input
+            name="last_name"
+            value={form.last_name}
+            onChange={handleChange}
+            className="input"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="label">Email</label>
+        <input
+          name="email"
+          type="email"
+          value={form.email}
+          onChange={handleChange}
+          className="input"
+        />
+      </div>
+      <div>
+        <label className="label">Phone</label>
+        <input
+          name="phone"
+          value={form.phone}
+          onChange={handleChange}
+          className="input"
+        />
+      </div>
+      <div>
+        <label className="label">Password *</label>
+        <input
+          name="password"
+          type="password"
+          value={form.password}
+          onChange={handleChange}
+          className="input"
+          required
+        />
+      </div>
+      <div>
+        <label className="label">Role</label>
+        <select
+          name="role_id"
+          value={form.role_id}
+          onChange={handleChange}
+          className="input"
+        >
+          <option value={1}>Admin</option>
+          <option value={2}>Manager</option>
+          <option value={3}>Cashier</option>
+        </select>
+      </div>
+      <div>
+        <label className="label">Location</label>
+        <input
+          name="location_id"
+          type="number"
+          value={form.location_id}
+          onChange={handleChange}
+          className="input"
+        />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button type="button" className="btn" onClick={onSuccess} disabled={loading}>
+          Cancel
+        </button>
+        <button type="submit" className="btn-primary" disabled={loading}>
+          {loading ? 'Saving...' : 'Create User'}
+        </button>
+      </div>
+    </form>
+  );
+}
 }
 
 // Security Settings Component

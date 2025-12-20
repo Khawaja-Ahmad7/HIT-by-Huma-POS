@@ -89,25 +89,25 @@ export default function Dashboard() {
   
   // Calculate cash and card sales from payment breakdown
   const cashSales = paymentBreakdown
-    .filter(p => p.MethodType === 'CASH')
-    .reduce((sum, p) => sum + (p.Total || 0), 0);
+    .filter(p => (p.MethodType || p.method_type) === 'CASH')
+    .reduce((sum, p) => sum + (p.Total || p.total || 0), 0);
   const cardSales = paymentBreakdown
-    .filter(p => p.MethodType === 'CARD')
-    .reduce((sum, p) => sum + (p.Total || 0), 0);
+    .filter(p => (p.MethodType || p.method_type) === 'CARD')
+    .reduce((sum, p) => sum + (p.Total || p.total || 0), 0);
 
   const stats = {
-    totalRevenue: today.TotalSales || 0,
-    totalOrders: today.TransactionCount || 0,
-    avgOrderValue: today.AverageTransaction || 0,
-    customersServed: today.TransactionCount || 0, // Using orders as proxy for customers
-    revenueChange: today.growthPercent || 0,
-    ordersChange: today.growthPercent || 0,
+    totalRevenue: parseFloat(today.TotalSales || today.revenue) || 0,
+    totalOrders: parseInt(today.TransactionCount || today.transactions) || 0,
+    avgOrderValue: parseFloat(today.AverageTransaction || today.avg_transaction) || 0,
+    customersServed: parseInt(today.TransactionCount || today.transactions) || 0,
+    revenueChange: parseFloat(today.growthPercent) || 0,
+    ordersChange: parseFloat(today.growthPercent) || 0,
     avgOrderChange: 0,
     customersChange: 0,
-    totalDiscounts: today.TotalDiscounts || 0,
+    totalDiscounts: parseFloat(today.TotalDiscounts || today.discounts) || 0,
     cashSales,
     cardSales,
-    itemsSold: 0,
+    itemsSold: parseInt(today.ItemsSold || today.itemsSold) || 0,
     returns: 0,
     avgItemsPerOrder: 0
   };
@@ -258,17 +258,19 @@ export default function Dashboard() {
           </div>
           
           <div className="h-64">
-            {hourlyData?.length > 0 ? (
+            {(hourlyData?.data || hourlyData)?.length > 0 ? (
               <div className="flex items-end justify-between h-full gap-1 pt-4">
-                {hourlyData.map((hour, i) => {
-                  const maxSales = Math.max(...hourlyData.map(h => h.sales || 0));
-                  const height = maxSales > 0 ? ((hour.sales || 0) / maxSales) * 100 : 0;
+                {(hourlyData?.data || hourlyData).map((hour, i) => {
+                  const hourlyArr = hourlyData?.data || hourlyData || [];
+                  const maxSales = Math.max(...hourlyArr.map(h => parseFloat(h.sales || h.revenue) || 0));
+                  const sales = parseFloat(hour.sales || hour.revenue) || 0;
+                  const height = maxSales > 0 ? (sales / maxSales) * 100 : 0;
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center group relative">
                       {/* Tooltip */}
                       <div className="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-10">
-                        <p>${(hour.sales || 0).toFixed(2)}</p>
-                        <p>{hour.orders || 0} orders</p>
+                        <p>${sales.toFixed(2)}</p>
+                        <p>{hour.orders || hour.transactions || 0} orders</p>
                       </div>
                       <div
                         className="w-full bg-gradient-to-t from-primary-600 to-primary-400 rounded-t hover:from-primary-700 hover:to-primary-500 transition-all cursor-pointer"
@@ -302,10 +304,12 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-4">
-            {categoryData?.length > 0 ? (
-              categoryData.slice(0, 6).map((category, i) => {
-                const totalSales = categoryData.reduce((sum, c) => sum + (c.sales || 0), 0);
-                const percentage = totalSales > 0 ? ((category.sales || 0) / totalSales) * 100 : 0;
+            {(categoryData?.data || categoryData)?.length > 0 ? (
+              (categoryData?.data || categoryData).slice(0, 6).map((category, i) => {
+                const catArr = categoryData?.data || categoryData || [];
+                const totalSales = catArr.reduce((sum, c) => sum + (parseFloat(c.sales || c.revenue) || 0), 0);
+                const sales = parseFloat(category.sales || category.revenue) || 0;
+                const percentage = totalSales > 0 ? (sales / totalSales) * 100 : 0;
                 const colors = [
                   'bg-primary-500', 'bg-blue-500', 'bg-green-500', 
                   'bg-yellow-500', 'bg-purple-500', 'bg-pink-500'
@@ -313,10 +317,10 @@ export default function Dashboard() {
                 return (
                   <div key={i}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-gray-700">{category.name}</span>
+                      <span className="font-medium text-gray-700">{category.name || category.category_name || category.category}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-500">
-                          ${(category.sales || 0).toLocaleString()}
+                          ${sales.toLocaleString()}
                         </span>
                         <span className="text-xs text-gray-400">
                           ({percentage.toFixed(1)}%)
@@ -369,12 +373,12 @@ export default function Dashboard() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 truncate">
-                      {product.ProductName}{product.VariantName ? ` - ${product.VariantName}` : ''}
+                      {product.ProductName || product.product_name}{(product.VariantName || product.variant_name) ? ` - ${product.VariantName || product.variant_name}` : ''}
                     </p>
-                    <p className="text-xs text-gray-500">{product.QuantitySold} sold</p>
+                    <p className="text-xs text-gray-500">{parseInt(product.QuantitySold || product.sold) || 0} sold</p>
                   </div>
                   <p className="font-semibold text-gray-900">
-                    ${(product.Revenue || 0).toLocaleString()}
+                    ${(parseFloat(product.Revenue || product.revenue) || 0).toLocaleString()}
                   </p>
                 </div>
               ))
@@ -397,31 +401,34 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-3">
-            {employeeData?.length > 0 ? (
-              employeeData.map((employee, i) => (
+            {(employeeData?.data || employeeData)?.length > 0 ? (
+              (employeeData?.data || employeeData).map((employee, i) => {
+                const empName = employee.name || `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || 'Unknown';
+                const initials = empName.split(' ').filter(n => n.length > 0).map(n => n[0]).join('').substring(0, 2) || '?';
+                return (
                 <div
                   key={i}
                   className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
                 >
                   <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-purple-600 rounded-full flex items-center justify-center">
                     <span className="text-white font-bold text-sm">
-                      {employee.name?.split(' ').map(n => n[0]).join('') || '?'}
+                      {initials}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{employee.name}</p>
-                    <p className="text-xs text-gray-500">{employee.transactions} sales</p>
+                    <p className="font-medium text-gray-900 truncate">{empName}</p>
+                    <p className="text-xs text-gray-500">{parseInt(employee.transactions) || 0} sales</p>
                   </div>
                   <div className="text-right">
                     <p className="font-semibold text-gray-900">
-                      ${(employee.sales || 0).toLocaleString()}
+                      ${(parseFloat(employee.sales || employee.revenue) || 0).toLocaleString()}
                     </p>
                     {i === 0 && (
                       <span className="text-xs text-yellow-600">🏆 Top</span>
                     )}
                   </div>
                 </div>
-              ))
+              )})
             ) : (
               <div className="text-center py-8 text-gray-400">
                 <UserGroupIcon className="w-10 h-10 mx-auto mb-2" />
@@ -522,29 +529,29 @@ export default function Dashboard() {
                   <tr key={i} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <span className="font-medium text-gray-900">
-                        #{tx.SaleNumber || tx.SaleID}
+                        #{tx.SaleNumber || tx.sale_number || tx.SaleID || tx.sale_id}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-gray-600">
-                      {tx.CustomerFirstName ? `${tx.CustomerFirstName} ${tx.CustomerLastName || ''}`.trim() : 'Walk-in'}
+                      {(tx.CustomerFirstName || tx.customer_first_name) ? `${tx.CustomerFirstName || tx.customer_first_name} ${tx.CustomerLastName || tx.customer_last_name || ''}`.trim() : 'Walk-in'}
                     </td>
                     <td className="px-6 py-4 text-gray-600">
                       -
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        tx.Status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
-                        tx.Status === 'VOIDED' ? 'bg-red-100 text-red-700' :
+                        (tx.Status || tx.status) === 'completed' || (tx.Status || tx.status) === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                        (tx.Status || tx.status) === 'voided' || (tx.Status || tx.status) === 'VOIDED' ? 'bg-red-100 text-red-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {tx.Status || 'N/A'}
+                        {tx.Status || tx.status || 'N/A'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-gray-500 text-sm">
-                      {tx.CreatedAt ? new Date(tx.CreatedAt).toLocaleTimeString() : '-'}
+                      {(tx.CreatedAt || tx.created_at) ? new Date(tx.CreatedAt || tx.created_at).toLocaleTimeString() : '-'}
                     </td>
                     <td className="px-6 py-4 text-right font-semibold text-gray-900">
-                      ${(tx.TotalAmount || 0).toFixed(2)}
+                      ${(parseFloat(tx.TotalAmount || tx.total_amount) || 0).toFixed(2)}
                     </td>
                   </tr>
                 ))

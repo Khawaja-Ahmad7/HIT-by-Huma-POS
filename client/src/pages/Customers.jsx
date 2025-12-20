@@ -191,57 +191,56 @@ export default function Customers() {
           customers.map((customer) => (
             <div
               key={customer.customer_id}
-              className="bg-white rounded-xl p-6 border hover:shadow-lg transition-shadow cursor-pointer"
+              className="bg-white rounded-2xl p-6 border hover:shadow-xl transition-shadow cursor-pointer flex flex-col gap-4"
               onClick={() => handleViewDetails(customer)}
             >
-              <div className="flex items-start gap-4 mb-4">
+              <div className="flex items-center gap-4 mb-2">
                 <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
                   <span className="text-2xl font-bold text-primary-600">
                     {customer.first_name?.[0]}{customer.last_name?.[0]}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-gray-900 truncate">
+                  <h3 className="font-semibold text-gray-900 text-lg truncate">
                     {customer.first_name} {customer.last_name}
                   </h3>
-                  <div className="flex items-center gap-1 text-sm text-gray-500 mt-1">
-                    <PhoneIcon className="w-4 h-4" />
-                    <span>{customer.phone || 'No phone'}</span>
+                  <div className="flex items-center gap-2 text-base text-primary-700 font-medium mt-1">
+                    <PhoneIcon className="w-5 h-5" />
+                    <span>{customer.phone || <span className="text-gray-400">No phone</span>}</span>
                   </div>
                   {customer.email && (
-                    <div className="flex items-center gap-1 text-sm text-gray-500">
+                    <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
                       <EnvelopeIcon className="w-4 h-4" />
                       <span className="truncate">{customer.email}</span>
                     </div>
                   )}
                 </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEdit(customer);
-                    }}
-                    className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg"
-                  >
-                    <PencilIcon className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEdit(customer);
+                  }}
+                  className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg self-start"
+                  title="Edit customer"
+                >
+                  <PencilIcon className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="flex items-center justify-between pt-4 border-t">
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t mt-2">
                 <div className="text-center">
                   <p className="text-xs text-gray-500">Total Spent</p>
-                  <p className="font-semibold text-gray-900">
+                  <p className="font-semibold text-gray-900 text-lg">
                     ${parseFloat(customer.total_spent || 0).toLocaleString()}
                   </p>
                 </div>
                 <div className="text-center">
                   <p className="text-xs text-gray-500">Orders</p>
-                  <p className="font-semibold text-gray-900">{customer.total_orders || 0}</p>
+                  <p className="font-semibold text-gray-900 text-lg">{customer.total_orders || 0}</p>
                 </div>
-                <div className="text-center">
+                <div className="text-center col-span-2">
                   <p className="text-xs text-gray-500">Credit</p>
-                  <p className="font-semibold text-green-600">
+                  <p className="font-semibold text-green-600 text-lg">
                     ${parseFloat(customer.wallet_balance || 0).toFixed(2)}
                   </p>
                 </div>

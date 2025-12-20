@@ -89,7 +89,11 @@ export default function POS() {
   };
 
   // Fetch products - use quick search for POS
-  const { data: searchResults, isLoading: productsLoading } = useQuery({
+  const {
+    data: searchResults,
+    isLoading: productsLoading,
+    refetch: refetchProducts
+  } = useQuery({
     queryKey: ['pos-products', selectedCategory, searchQuery],
     queryFn: async () => {
       // If there's a search query, use quick search
@@ -116,6 +120,7 @@ export default function POS() {
       toast.success('Sale completed successfully!');
       clearCart();
       setShowPayment(false);
+      refetchProducts(); // <-- Refetch products to update stock
       // Trigger receipt print - server returns saleId
       const saleId = response.data.saleId || response.data.transaction_id;
       if (saleId) {
@@ -172,27 +177,81 @@ export default function POS() {
     try {
       const response = await api.get(`/products/barcode/${barcode}`);
       if (response.data) {
-        addItem(response.data);
-        toast.success(`Added: ${response.data.name}`);
+        const product = response.data;
+        const stock = parseInt(product.stock) || 0;
+        
+        // Check if product is in stock
+        if (stock <= 0) {
+          toast.error(`${product.productName} is out of stock`);
+          return;
+        }
+        
+        // Check if adding more would exceed stock
+        const existingItem = items.find(item => item.variantId === product.variantId);
+        const currentQty = existingItem?.quantity || 0;
+        if (currentQty >= stock) {
+          toast.error(`Only ${stock} available in stock`);
+          return;
+        }
+        
+        addItem({
+          variantId: product.variantId,
+          productId: product.productId,
+          productName: product.productName,
+          variantName: product.variantName || 'Default',
+          sku: product.sku,
+          barcode: product.barcode,
+          price: product.price,
+          imageUrl: product.imageUrl,
+          stock: stock
+        });
+        const displayName = product.variantName && product.variantName !== 'Default'
+          ? `${product.productName} - ${product.variantName}`
+          : product.productName;
+        toast.success(`Scanned: ${displayName}`);
       }
     } catch (error) {
-      toast.error('Product not found');
+      toast.error(`Product not found: ${barcode}`);
     }
   };
 
   const handleProductClick = (product) => {
     // Normalize product data from either quick search or regular products endpoint
+    // Quick search returns: variant_id, sku, barcode, variant_name, price, product_name, product_code, product_id, stock
+    // Regular products returns: id, code, name, basePrice, variantId, sku, barcode, totalStock
+    const stock = parseInt(product.stock) ?? parseInt(product.totalStock) ?? 0;
+    
     const normalizedItem = {
-      variantId: product.variantId || (product.variants?.[0]?.id),
-      productId: product.productId || product.id,
-      productName: product.productName || product.name,
-      variantName: product.variantName || product.variants?.[0]?.name || 'Default',
-      sku: product.sku || product.code,
+      variantId: product.variantId || product.variant_id || (product.variants?.[0]?.id),
+      productId: product.productId || product.product_id || product.id,
+      productName: product.productName || product.product_name || product.name,
+      variantName: product.variantName || product.variant_name || product.variants?.[0]?.name || 'Default',
+      sku: product.sku || product.code || product.product_code,
       barcode: product.barcode,
-      price: product.price || product.basePrice,
-      imageUrl: product.imageUrl || product.imageURL,
-      stock: product.stock ?? product.totalStock ?? 0
+      price: parseFloat(product.price) || parseFloat(product.basePrice) || 0,
+      imageUrl: product.imageUrl || product.image_url || product.imageURL,
+      stock: stock
     };
+    
+    if (!normalizedItem.variantId) {
+      toast.error('Product variant not found. Please try again.');
+      console.error('Missing variantId for product:', product);
+      return;
+    }
+    
+    // Check if product is in stock
+    if (stock <= 0) {
+      toast.error(`${normalizedItem.productName} is out of stock`);
+      return;
+    }
+    
+    // Check if adding more would exceed stock
+    const existingItem = items.find(item => item.variantId === normalizedItem.variantId);
+    const currentQty = existingItem?.quantity || 0;
+    if (currentQty >= stock) {
+      toast.error(`Only ${stock} available in stock`);
+      return;
+    }
     
     addItem(normalizedItem);
     const displayName = normalizedItem.variantName && normalizedItem.variantName !== 'Default'
@@ -330,10 +389,24 @@ export default function POS() {
                 return (
                   <button
                     key={id}
-                    onClick={() => handleProductClick(product)}
-                    className="bg-white rounded-xl p-4 text-left hover:shadow-lg transition-shadow border border-gray-100 group"
+                    onClick={() => stock > 0 && handleProductClick(product)}
+                    disabled={stock <= 0}
+                    className={`bg-white rounded-xl p-4 text-left transition-shadow border border-gray-100 group ${
+                      stock <= 0 
+                        ? 'opacity-60 cursor-not-allowed' 
+                        : 'hover:shadow-lg'
+                    }`}
                   >
-                    <div className="w-full h-32 bg-gray-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden">
+                    <div className={`w-full h-32 bg-gray-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden relative ${
+                      stock <= 0 ? 'grayscale' : ''
+                    }`}>
+                      {stock <= 0 && (
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+                          <span className="text-white font-bold text-sm bg-red-600 px-3 py-1 rounded-full">
+                            OUT OF STOCK
+                          </span>
+                        </div>
+                      )}
                       {imageUrl ? (
                         <img
                           src={imageUrl}
@@ -470,7 +543,7 @@ export default function POS() {
                     </p>
                   </div>
                   <button
-                    onClick={() => removeItem(item.product_id, item.variant_id)}
+                    onClick={() => removeItem(item.variantId)}
                     className="p-1 text-gray-400 hover:text-red-500"
                   >
                     <XMarkIcon className="w-4 h-4" />
@@ -479,15 +552,27 @@ export default function POS() {
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => updateQuantity(item.product_id, item.variant_id, item.quantity - 1)}
+                      onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
                       className="w-8 h-8 flex items-center justify-center bg-white border rounded-lg hover:bg-gray-100"
                     >
                       <MinusIcon className="w-4 h-4" />
                     </button>
                     <span className="w-8 text-center font-medium">{item.quantity}</span>
                     <button
-                      onClick={() => updateQuantity(item.product_id, item.variant_id, item.quantity + 1)}
-                      className="w-8 h-8 flex items-center justify-center bg-white border rounded-lg hover:bg-gray-100"
+                      onClick={() => {
+                        const stock = item.stock || 0;
+                        if (item.quantity >= stock) {
+                          toast.error(`Only ${stock} available in stock`);
+                          return;
+                        }
+                        updateQuantity(item.variantId, item.quantity + 1);
+                      }}
+                      disabled={item.quantity >= (item.stock || 0)}
+                      className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${
+                        item.quantity >= (item.stock || 0) 
+                          ? 'opacity-50 cursor-not-allowed' 
+                          : 'hover:bg-gray-100'
+                      }`}
                     >
                       <PlusIcon className="w-4 h-4" />
                     </button>
