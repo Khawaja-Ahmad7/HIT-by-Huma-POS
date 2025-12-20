@@ -8,26 +8,44 @@ router.use(authenticate);
 // Get dashboard data
 router.get('/dashboard', async (req, res, next) => {
   try {
-    const { locationId } = req.query;
+    const { locationId, range, startDate, endDate } = req.query;
     const pool = db.getPool();
     
     const params = [];
     let locationFilter = '';
     let paramIndex = 1;
-    
+
     if (locationId) {
       locationFilter = ` AND location_id = $${paramIndex++}`;
       params.push(parseInt(locationId));
     }
-    
-    // Today's stats
+
+    // Build time filter based on range or explicit start/end dates
+    // timeFilter contains SQL fragment starting with ' AND '
+    let timeFilter = ` AND DATE(created_at) = CURRENT_DATE`;
+    if (startDate) {
+      timeFilter = ` AND created_at >= $${paramIndex++}`;
+      params.push(startDate);
+      if (endDate) {
+        timeFilter += ` AND created_at <= $${paramIndex++}`;
+        params.push(endDate);
+      }
+    } else if (range === 'week') {
+      timeFilter = ` AND created_at >= date_trunc('week', CURRENT_DATE)`;
+    } else if (range === 'month') {
+      timeFilter = ` AND created_at >= date_trunc('month', CURRENT_DATE)`;
+    } else if (range === 'year') {
+      timeFilter = ` AND created_at >= date_trunc('year', CURRENT_DATE)`;
+    }
+
+    // Today's/selected range stats
     const todayResult = await pool.query(
       `SELECT 
         COUNT(*) as transactions,
         COALESCE(SUM(total_amount), 0) as revenue,
         COALESCE(AVG(total_amount), 0) as avg_transaction
        FROM sales
-       WHERE DATE(created_at) = CURRENT_DATE AND status = 'completed' ${locationFilter}`,
+       WHERE status = 'completed' ${timeFilter} ${locationFilter}`,
       params
     );
     
@@ -36,7 +54,7 @@ router.get('/dashboard', async (req, res, next) => {
       `SELECT COALESCE(SUM(si.quantity), 0) as items_sold
        FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed' ${locationFilter}`,
+       WHERE s.status = 'completed' ${timeFilter} ${locationFilter}`,
       params
     );
     
@@ -56,7 +74,7 @@ router.get('/dashboard', async (req, res, next) => {
        INNER JOIN sales s ON si.sale_id = s.sale_id
        INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
        INNER JOIN products p ON pv.product_id = p.product_id
-       WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed' ${locationFilter}
+       WHERE s.status = 'completed' ${timeFilter} ${locationFilter}
        GROUP BY p.product_name, pv.variant_name
        ORDER BY sold DESC
        LIMIT 5`,
@@ -67,7 +85,7 @@ router.get('/dashboard', async (req, res, next) => {
     const hourlyResult = await pool.query(
       `SELECT EXTRACT(HOUR FROM created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue
        FROM sales
-       WHERE DATE(created_at) = CURRENT_DATE AND status = 'completed' ${locationFilter}
+       WHERE status = 'completed' ${timeFilter} ${locationFilter}
        GROUP BY EXTRACT(HOUR FROM created_at)
        ORDER BY hour`,
       params
@@ -79,7 +97,7 @@ router.get('/dashboard', async (req, res, next) => {
        FROM sale_payments sp
        INNER JOIN sales s ON sp.sale_id = s.sale_id
        INNER JOIN payment_methods pm ON sp.payment_method_id = pm.payment_method_id
-       WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed' ${locationFilter}
+       WHERE s.status = 'completed' ${timeFilter} ${locationFilter}
        GROUP BY pm.method_name, pm.method_type`,
       params
     );
