@@ -41,12 +41,13 @@ router.get('/dashboard', async (req, res, next) => {
       timeFilter = ` AND created_at >= date_trunc('year', CURRENT_DATE)`;
     }
 
-    // Today's/selected range stats
+    // Today's/selected range stats (include discounts)
     const todayResult = await pool.query(
       `SELECT 
         COUNT(*) as transactions,
         COALESCE(SUM(total_amount), 0) as revenue,
-        COALESCE(AVG(total_amount), 0) as avg_transaction
+        COALESCE(AVG(total_amount), 0) as avg_transaction,
+        COALESCE(SUM(discount_amount), 0) as discounts
        FROM sales
        WHERE status = 'completed' ${timeFilter} ${locationFilter}`,
       params
@@ -105,32 +106,60 @@ router.get('/dashboard', async (req, res, next) => {
       params
     );
 
-    const today = todayResult.rows[0] || { transactions: 0, revenue: 0, avg_transaction: 0 };
+    const today = todayResult.rows[0] || { transactions: 0, revenue: 0, avg_transaction: 0, discounts: 0 };
     const itemsSold = itemsResult.rows[0]?.items_sold || 0;
-    
+
+    // Normalize payment breakdown and compute cash/card totals
+    const paymentBreakdown = paymentsResult.rows.map(p => ({
+      method_name: p.method_name,
+      method_type: (p.method_type || '').toString(),
+      total: parseFloat(p.total) || 0
+    }));
+
+    const cashSales = paymentBreakdown
+      .filter(p => p.method_type && p.method_type.toLowerCase() === 'cash')
+      .reduce((s, p) => s + p.total, 0);
+    const cardSales = paymentBreakdown
+      .filter(p => p.method_type && p.method_type.toLowerCase().includes('card'))
+      .reduce((s, p) => s + p.total, 0);
+
+    // Normalize top products for frontend
+    const topProducts = topProductsResult.rows.map(p => ({
+      name: p.product_name,
+      variant: p.variant_name,
+      quantity: parseInt(p.sold) || 0,
+      revenue: parseFloat(p.revenue) || 0
+    }));
+
+    // Build flattened summary fields expected by frontend
+    const summary = {
+      totalRevenue: parseFloat(today.revenue) || 0,
+      totalOrders: parseInt(today.transactions) || 0,
+      avgOrderValue: parseFloat(today.avg_transaction) || 0,
+      itemsSold: parseInt(itemsSold) || 0,
+      totalDiscounts: parseFloat(today.discounts) || 0,
+      cashSales,
+      cardSales
+    };
+
     res.json({
+      // original nested response for backward-compatibility
       today: {
         transactions: parseInt(today.transactions) || 0,
         revenue: parseFloat(today.revenue) || 0,
         avg_transaction: parseFloat(today.avg_transaction) || 0,
-        itemsSold: parseInt(itemsSold) || 0
+        itemsSold: parseInt(itemsSold) || 0,
+        discounts: parseFloat(today.discounts) || 0
       },
       lowStockCount: parseInt(lowStockResult.rows[0]?.count) || 0,
-      topProducts: topProductsResult.rows.map(p => ({
-        product_name: p.product_name,
-        variant_name: p.variant_name,
-        sold: parseInt(p.sold) || 0,
-        revenue: parseFloat(p.revenue) || 0
-      })),
+      topProducts: topProducts,
       hourlySales: hourlyResult.rows.map(h => ({
         hour: parseInt(h.hour),
         revenue: parseFloat(h.revenue) || 0
       })),
-      paymentBreakdown: paymentsResult.rows.map(p => ({
-        method_name: p.method_name,
-        method_type: p.method_type,
-        total: parseFloat(p.total) || 0
-      }))
+      paymentBreakdown: paymentBreakdown,
+      // flattened summary (convenience for frontend)
+      ...summary
     });
   } catch (error) {
     console.error('Dashboard error:', error);
