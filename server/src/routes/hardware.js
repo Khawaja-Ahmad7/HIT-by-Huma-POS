@@ -4,15 +4,16 @@ const { authenticate, authorize } = require('../middleware/auth');
 const router = express.Router();
 router.use(authenticate);
 
+const printerService = require('../services/printerService');
+
 // Get printer status (mock for cloud deployment)
 router.get('/printer/status', async (req, res) => {
-  // In cloud deployment, we return a mock status
-  // Real hardware would be managed locally
-  res.json({
-    connected: false,
-    message: 'Hardware not available in cloud deployment',
-    printerType: 'none'
-  });
+  try {
+    const status = await printerService.testConnection();
+    res.json(Object.assign({ message: 'Local hardware status' }, status));
+  } catch (err) {
+    res.json({ connected: false, message: 'Printer status unknown', error: err.message });
+  }
 });
 
 // Print receipt (mock for cloud deployment)
@@ -36,12 +37,22 @@ router.post('/printer/receipt', authorize('pos'), async (req, res) => {
 // Open cash drawer (mock for cloud deployment)
 router.post('/drawer/open', authorize('pos'), async (req, res) => {
   console.log('Cash drawer open requested by user:', req.user?.employee_code);
-  
-  res.json({
-    success: true,
-    opened: false,
-    message: 'Cash drawer command not available in cloud deployment'
-  });
+  try {
+    const result = await printerService.openCashDrawer();
+    res.json({ success: true, opened: !!result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to open cash drawer', error: error.message });
+  }
+});
+
+// Alias endpoint used by client code
+router.post('/cash-drawer/open', authorize('pos'), async (req, res) => {
+  try {
+    const result = await printerService.openCashDrawer();
+    res.json({ success: true, opened: !!result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to open cash drawer', error: error.message });
+  }
 });
 
 // Print label (mock for cloud deployment)
@@ -50,12 +61,40 @@ router.post('/label/print', authorize('inventory'), async (req, res) => {
   
   console.log('Label print requested:', { barcode, productName, quantity });
   
-  res.json({
-    success: true,
-    printed: false,
-    message: 'Label printing not available in cloud deployment',
-    labels: quantity || 1
-  });
+  try {
+    const result = await printerService.printLabel({ sku: barcode || productName, barcode, name: productName, price, quantity });
+    res.json({ success: true, printed: !!result, labels: quantity || 1 });
+  } catch (error) {
+    res.status(500).json({ success: false, printed: false, message: error.message });
+  }
+});
+
+// Test a hardware device (client calls POST /hardware/test/:device)
+router.post('/test/:device', authorize('pos'), async (req, res) => {
+  const { device } = req.params;
+  try {
+    if (device === 'printer') {
+      const status = await printerService.testConnection();
+      res.json({ success: true, device: 'printer', status });
+      return;
+    }
+
+    // For other devices, return mock/placeholder
+    res.json({ success: true, device, message: 'Test executed (mock for this device)' });
+  } catch (error) {
+    res.status(500).json({ success: false, device, error: error.message });
+  }
+});
+
+// Set thermal printer interface at runtime
+router.post('/printer/interface', authorize('settings'), async (req, res) => {
+  const { interface: iface } = req.body;
+  try {
+    const ok = await printerService.setInterface(iface);
+    res.json({ success: !!ok, interface: iface });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Get barcode scanner status

@@ -405,12 +405,29 @@ function StoreSettings() {
 // Hardware Settings Component
 function HardwareSettings() {
   const [testing, setTesting] = useState(null);
+  const [printerPort, setPrinterPort] = useState('');
+  const [savingPort, setSavingPort] = useState(false);
 
   const { data: devices } = useQuery({
     queryKey: ['hardware-status'],
     queryFn: () => api.get('/hardware/status').then(res => res.data),
     refetchInterval: 5000
   });
+
+  // Load saved printer interface from settings
+  useEffect(() => {
+    let mounted = true;
+    api.get('/settings/thermal_printer_interface')
+      .then(res => {
+        if (!mounted) return;
+        const val = res.data?.setting_value || res.data?.setting_value || '';
+        setPrinterPort(val || '');
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => { mounted = false; };
+  }, []);
 
   const testDevice = async (device) => {
     setTesting(device);
@@ -536,11 +553,36 @@ function HardwareSettings() {
         <div className="space-y-4 max-w-md">
           <div>
             <label className="label">Printer Port/IP</label>
-            <input
-              type="text"
-              placeholder="192.168.1.100 or COM3"
-              className="input"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={printerPort}
+                onChange={(e) => setPrinterPort(e.target.value)}
+                placeholder="192.168.1.100 or printer:MediaLink_9250s or COM3"
+                className="input"
+              />
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  try {
+                    setSavingPort(true);
+                    // Save to settings table
+                    await api.put('/settings/thermal_printer_interface', { value: printerPort });
+                    // Apply at runtime
+                    await api.post('/hardware/printer/interface', { interface: printerPort });
+                    toast.success('Printer interface saved');
+                  } catch (err) {
+                    toast.error('Failed to save printer interface');
+                  } finally {
+                    setSavingPort(false);
+                  }
+                }}
+                disabled={savingPort}
+              >
+                {savingPort ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mt-2">Enter the OS printer name or IP/interface string used by the server.</p>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <div>

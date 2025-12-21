@@ -22,6 +22,7 @@ class PrinterService {
     this.isCloudMode = !ThermalPrinter; // No hardware in cloud
     this.companyName = process.env.COMPANY_NAME || 'HIT BY HUMA';
     this.currency = process.env.CURRENCY_SYMBOL || 'PKR';
+    this.interface = process.env.THERMAL_PRINTER_INTERFACE || null;
   }
 
   /**
@@ -36,7 +37,7 @@ class PrinterService {
     try {
       this.printer = new ThermalPrinter({
         type: PrinterTypes.EPSON,
-        interface: process.env.THERMAL_PRINTER_INTERFACE || 'printer:auto',
+        interface: this.interface || process.env.THERMAL_PRINTER_INTERFACE || 'printer:auto',
         characterSet: 'SLOVENIA',
         removeSpecialCharacters: false,
         lineCharacter: '-',
@@ -52,6 +53,27 @@ class PrinterService {
     } catch (error) {
       logger.error('Printer initialization failed:', error);
       this.isConnected = false;
+      return false;
+    }
+  }
+
+  /**
+   * Set the thermal printer interface at runtime (e.g. "printer:MediaLink_9250s" or "192.168.1.100")
+   */
+  async setInterface(interfaceString) {
+    this.interface = interfaceString;
+    process.env.THERMAL_PRINTER_INTERFACE = String(interfaceString || '');
+
+    // Reinitialize to apply new interface
+    try {
+      if (this.printer) {
+        this.printer.clear();
+        this.printer = null;
+      }
+      this.isConnected = false;
+      return await this.initialize();
+    } catch (err) {
+      logger.error('Failed to set printer interface:', err);
       return false;
     }
   }
