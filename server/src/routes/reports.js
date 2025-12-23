@@ -10,7 +10,7 @@ router.get('/dashboard', async (req, res, next) => {
   try {
     const { locationId, range, startDate, endDate } = req.query;
     const pool = db.getPool();
-    
+
     const params = [];
     let locationFilter = '';
     let paramIndex = 1;
@@ -48,11 +48,11 @@ router.get('/dashboard', async (req, res, next) => {
         COALESCE(SUM(total_amount), 0) as revenue,
         COALESCE(AVG(total_amount), 0) as avg_transaction,
         COALESCE(SUM(discount_amount), 0) as discounts
-       FROM sales
-       WHERE status = 'completed' ${timeFilter} ${locationFilter}`,
+       FROM sales s
+       WHERE s.status = 'completed' ${timeFilter} ${locationFilter}`,
       params
     );
-    
+
     // Items sold today
     const itemsResult = await pool.query(
       `SELECT COALESCE(SUM(si.quantity), 0) as items_sold
@@ -61,7 +61,7 @@ router.get('/dashboard', async (req, res, next) => {
        WHERE s.status = 'completed' ${timeFilter} ${locationFilter}`,
       params
     );
-    
+
     // Low stock alerts
     const lowStockParams = locationId ? [parseInt(locationId)] : [];
     const lowStockResult = await pool.query(
@@ -70,7 +70,7 @@ router.get('/dashboard', async (req, res, next) => {
        WHERE i.quantity_on_hand <= i.reorder_level ${locationId ? ' AND i.location_id = $1' : ''}`,
       lowStockParams
     );
-    
+
     // Top products today
     const topProductsResult = await pool.query(
       `SELECT p.product_name, pv.variant_name, SUM(si.quantity) as sold, SUM(si.line_total) as revenue
@@ -84,7 +84,7 @@ router.get('/dashboard', async (req, res, next) => {
        LIMIT 5`,
       params
     );
-    
+
     // Hourly sales
     const hourlyResult = await pool.query(
       `SELECT EXTRACT(HOUR FROM s.created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue
@@ -200,7 +200,7 @@ router.get('/category-breakdown', async (req, res, next) => {
        WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed'
        GROUP BY c.category_name
        ORDER BY revenue DESC`);
-    res.json({ data: result.rows.map(r => ({ name: r.name, revenue: parseFloat(r.revenue)||0, units: parseInt(r.units)||0 })) });
+    res.json({ data: result.rows.map(r => ({ name: r.name, revenue: parseFloat(r.revenue) || 0, units: parseInt(r.units) || 0 })) });
   } catch (error) {
     next(error);
   }
@@ -215,7 +215,7 @@ router.get('/realtime', async (req, res, next) => {
       `SELECT COUNT(*) as transactions, COALESCE(SUM(total_amount),0) as revenue
        FROM sales
        WHERE created_at >= NOW() - INTERVAL '1 minute' AND status = 'completed'`);
-    res.json({ transactions: parseInt(result.rows[0].transactions)||0, revenue: parseFloat(result.rows[0].revenue)||0 });
+    res.json({ transactions: parseInt(result.rows[0].transactions) || 0, revenue: parseFloat(result.rows[0].revenue) || 0 });
   } catch (error) {
     next(error);
   }
@@ -235,7 +235,7 @@ router.get('/employee-performance', async (req, res, next) => {
        ORDER BY revenue DESC
        LIMIT $1`, [parseInt(limit)]
     );
-    res.json({ data: result.rows.map(r => ({ user_id: r.user_id, name: `${r.first_name} ${r.last_name}`, transactions: parseInt(r.transactions)||0, revenue: parseFloat(r.revenue)||0 })) });
+    res.json({ data: result.rows.map(r => ({ user_id: r.user_id, name: `${r.first_name} ${r.last_name}`, transactions: parseInt(r.transactions) || 0, revenue: parseFloat(r.revenue) || 0 })) });
   } catch (error) {
     next(error);
   }
@@ -246,29 +246,29 @@ router.get('/sales', authorize('reports'), async (req, res, next) => {
   try {
     const { locationId, startDate, endDate, groupBy = 'day' } = req.query;
     const pool = db.getPool();
-    
+
     const params = [];
     let whereClause = "WHERE status = 'completed'";
     let paramIndex = 1;
-    
+
     if (locationId) {
       whereClause += ` AND location_id = $${paramIndex++}`;
       params.push(parseInt(locationId));
     }
-    
+
     if (startDate) {
       whereClause += ` AND created_at >= $${paramIndex++}`;
       params.push(startDate);
     }
-    
+
     if (endDate) {
       whereClause += ` AND created_at <= $${paramIndex++}`;
       params.push(endDate);
     }
-    
+
     let groupByClause = 'DATE(s.created_at)';
     let selectDate = 'DATE(s.created_at) as date';
-    
+
     if (groupBy === 'month') {
       groupByClause = "TO_CHAR(s.created_at, 'YYYY-MM')";
       selectDate = "TO_CHAR(s.created_at, 'YYYY-MM') as date";
@@ -276,7 +276,7 @@ router.get('/sales', authorize('reports'), async (req, res, next) => {
       groupByClause = "DATE_TRUNC('week', s.created_at)";
       selectDate = "DATE_TRUNC('week', s.created_at) as date";
     }
-    
+
     const result = await pool.query(
       `SELECT ${selectDate},
         COUNT(*) as transactions,
@@ -289,7 +289,7 @@ router.get('/sales', authorize('reports'), async (req, res, next) => {
        ORDER BY date DESC`,
       params
     );
-    
+
     res.json({ data: result.rows });
   } catch (error) {
     next(error);
@@ -301,26 +301,26 @@ router.get('/sales-by-category', authorize('reports'), async (req, res, next) =>
   try {
     const { locationId, startDate, endDate } = req.query;
     const pool = db.getPool();
-    
+
     const params = [];
     let whereClause = "WHERE s.status = 'completed'";
     let paramIndex = 1;
-    
+
     if (locationId) {
       whereClause += ` AND s.location_id = $${paramIndex++}`;
       params.push(parseInt(locationId));
     }
-    
+
     if (startDate) {
       whereClause += ` AND s.created_at >= $${paramIndex++}`;
       params.push(startDate);
     }
-    
+
     if (endDate) {
       whereClause += ` AND s.created_at <= $${paramIndex++}`;
       params.push(endDate);
     }
-    
+
     const result = await pool.query(
       `SELECT c.category_name, 
         COUNT(DISTINCT s.sale_id) as transactions,
@@ -336,7 +336,7 @@ router.get('/sales-by-category', authorize('reports'), async (req, res, next) =>
        ORDER BY revenue DESC`,
       params
     );
-    
+
     res.json({ data: result.rows });
   } catch (error) {
     next(error);
@@ -348,26 +348,26 @@ router.get('/sales-by-employee', authorize('reports'), async (req, res, next) =>
   try {
     const { locationId, startDate, endDate } = req.query;
     const pool = db.getPool();
-    
+
     const params = [];
     let whereClause = "WHERE s.status = 'completed'";
     let paramIndex = 1;
-    
+
     if (locationId) {
       whereClause += ` AND s.location_id = $${paramIndex++}`;
       params.push(parseInt(locationId));
     }
-    
+
     if (startDate) {
       whereClause += ` AND s.created_at >= $${paramIndex++}`;
       params.push(startDate);
     }
-    
+
     if (endDate) {
       whereClause += ` AND s.created_at <= $${paramIndex++}`;
       params.push(endDate);
     }
-    
+
     const result = await pool.query(
       `SELECT u.first_name, u.last_name,
         COUNT(*) as transactions,
@@ -380,7 +380,7 @@ router.get('/sales-by-employee', authorize('reports'), async (req, res, next) =>
        ORDER BY revenue DESC`,
       params
     );
-    
+
     res.json({ data: result.rows });
   } catch (error) {
     next(error);
@@ -392,16 +392,16 @@ router.post('/z-report', authorize('reports'), async (req, res, next) => {
   try {
     const { locationId, shiftId } = req.body;
     const pool = db.getPool();
-    
+
     const params = [parseInt(locationId)];
     let shiftFilter = '';
     let paramIndex = 2;
-    
+
     if (shiftId) {
       shiftFilter = ` AND shift_id = $${paramIndex++}`;
       params.push(parseInt(shiftId));
     }
-    
+
     // Get sales summary
     const salesResult = await pool.query(
       `SELECT 
@@ -413,7 +413,7 @@ router.post('/z-report', authorize('reports'), async (req, res, next) => {
        WHERE location_id = $1 AND DATE(created_at) = CURRENT_DATE AND status = 'completed' ${shiftFilter}`,
       params
     );
-    
+
     // Get payment breakdown
     const paymentsResult = await pool.query(
       `SELECT pm.method_name, COALESCE(SUM(sp.amount), 0) as total
@@ -424,7 +424,7 @@ router.post('/z-report', authorize('reports'), async (req, res, next) => {
        GROUP BY pm.method_name`,
       params
     );
-    
+
     res.json({
       date: new Date().toISOString(),
       summary: salesResult.rows[0],
