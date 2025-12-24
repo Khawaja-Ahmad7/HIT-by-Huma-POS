@@ -574,20 +574,8 @@ export default function POS() {
                       </button>
                       <span className="w-8 text-center font-medium">{item.quantity}</span>
                       <button
-                        onClick={() => {
-                          const stock = item.stock;
-                          // Only check stock limit if we have a valid positive stock value
-                          if (stock && stock > 0 && item.quantity >= stock) {
-                            toast.error(`Only ${stock} available in stock`);
-                            return;
-                          }
-                          updateQuantity(item.variantId, item.quantity + 1);
-                        }}
-                        disabled={item.stock > 0 && item.quantity >= item.stock}
-                        className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${item.stock > 0 && item.quantity >= item.stock
-                          ? 'opacity-50 cursor-not-allowed'
-                          : 'hover:bg-gray-100'
-                          }`}
+                        onClick={() => updateQuantity(item.variantId, item.quantity + 1)}
+                        className="w-8 h-8 flex items-center justify-center bg-white border rounded-lg hover:bg-gray-100"
                       >
                         <PlusIcon className="w-4 h-4" />
                       </button>
