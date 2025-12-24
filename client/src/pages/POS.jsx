@@ -575,15 +575,16 @@ export default function POS() {
                       <span className="w-8 text-center font-medium">{item.quantity}</span>
                       <button
                         onClick={() => {
-                          const stock = item.stock || 0;
-                          if (item.quantity >= stock) {
+                          const stock = item.stock;
+                          // Only check stock limit if we have a valid positive stock value
+                          if (stock && stock > 0 && item.quantity >= stock) {
                             toast.error(`Only ${stock} available in stock`);
                             return;
                           }
                           updateQuantity(item.variantId, item.quantity + 1);
                         }}
-                        disabled={item.quantity >= (item.stock || 0)}
-                        className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${item.quantity >= (item.stock || 0)
+                        disabled={item.stock > 0 && item.quantity >= item.stock}
+                        className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${item.stock > 0 && item.quantity >= item.stock
                           ? 'opacity-50 cursor-not-allowed'
                           : 'hover:bg-gray-100'
                           }`}
