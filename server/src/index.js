@@ -41,8 +41,28 @@ app.set('trust proxy', 1);
 
 // Security Middleware
 app.use(helmet());
+
+// Allow multiple origins for development and production
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://hit-by-huma-pos-client.vercel.app',
+  'https://hit-by-huma-pos-client-iawf.vercel.app',
+  process.env.CLIENT_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+
+    // Check if origin is in allowed list or is a Vercel preview URL
+    if (allowedOrigins.includes(origin) || origin.includes('.vercel.app')) {
+      callback(null, true);
+    } else {
+      callback(new Error(`Origin ${origin} not allowed by CORS`));
+    }
+  },
   credentials: true
 }));
 
@@ -91,10 +111,10 @@ app.get('/health', async (req, res) => {
   } catch (error) {
     dbStatus = 'disconnected: ' + error.message;
   }
-  
+
   // Always return 200 so Railway healthcheck passes
-  res.json({ 
-    status: 'running', 
+  res.json({
+    status: 'running',
     timestamp: new Date().toISOString(),
     database: dbStatus
   });
@@ -103,19 +123,19 @@ app.get('/health', async (req, res) => {
 // Socket.IO Connection Handler
 io.on('connection', (socket) => {
   logger.info(`Client connected: ${socket.id}`);
-  
+
   // Join location-specific room for real-time updates
   socket.on('join-location', (locationId) => {
     socket.join(`location-${locationId}`);
     logger.info(`Socket ${socket.id} joined location-${locationId}`);
   });
-  
+
   // Customer Facing Display - Join terminal
   socket.on('join-cfd', (terminalId) => {
     socket.join(`cfd-${terminalId}`);
     logger.info(`CFD connected: ${terminalId}`);
   });
-  
+
   socket.on('disconnect', () => {
     logger.info(`Client disconnected: ${socket.id}`);
   });
@@ -137,7 +157,7 @@ const startServer = async () => {
   httpServer.listen(PORT, async () => {
     logger.info(`🚀 HIT BY HUMA POS Server running on port ${PORT}`);
     logger.info(`📡 API available at http://localhost:${PORT}${API_PREFIX}`);
-    
+
     // Now try to connect to database (after server is listening)
     try {
       // Run database migrations
@@ -147,7 +167,7 @@ const startServer = async () => {
       } catch (migrationError) {
         logger.warn('Migration encountered issues:', migrationError.message);
       }
-      
+
       // Connect to database
       await db.connect();
       logger.info('Database connected successfully');
