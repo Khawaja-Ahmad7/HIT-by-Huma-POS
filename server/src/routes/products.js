@@ -14,28 +14,28 @@ router.get('/', async (req, res, next) => {
   try {
     const { categoryId, search, page = 1, limit = 50, includeInactive } = req.query;
     const offset = (page - 1) * limit;
-    
+
     let whereClause = 'WHERE 1=1';
     const params = [];
     let paramIndex = 1;
-    
+
     if (!includeInactive) {
       whereClause += ' AND p.is_active = true';
     }
-    
+
     if (categoryId) {
       whereClause += ` AND p.category_id = $${paramIndex++}`;
       params.push(parseInt(categoryId));
     }
-    
+
     if (search) {
       whereClause += ` AND (p.product_name ILIKE $${paramIndex} OR p.product_code ILIKE $${paramIndex})`;
       params.push(`%${search}%`);
       paramIndex++;
     }
-    
+
     const pool = db.getPool();
-    
+
     // Get products with pagination and default variant info
     const result = await pool.query(
       `SELECT p.*, c.category_name,
@@ -53,13 +53,13 @@ router.get('/', async (req, res, next) => {
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
       [...params, parseInt(limit), offset]
     );
-    
+
     // Get total count
     const countResult = await pool.query(
       `SELECT COUNT(*) as total FROM products p ${whereClause}`,
       params
     );
-    
+
     // Transform to camelCase for frontend
     const products = result.rows.map(p => ({
       id: p.product_id,
@@ -100,11 +100,11 @@ router.get('/', async (req, res, next) => {
 router.get('/search/quick', async (req, res, next) => {
   try {
     const { q, locationId } = req.query;
-    
+
     if (!q || q.length < 2) {
       return res.json({ products: [] });
     }
-    
+
     const pool = db.getPool();
     const result = await pool.query(
       `SELECT pv.variant_id, pv.sku, pv.barcode, pv.variant_name, pv.price,
@@ -119,7 +119,7 @@ router.get('/search/quick', async (req, res, next) => {
        LIMIT 20`,
       [parseInt(locationId) || 1, `%${q}%`, q]
     );
-    
+
     res.json({ products: result.rows });
   } catch (error) {
     next(error);
@@ -131,7 +131,7 @@ router.get('/barcode/:barcode', async (req, res, next) => {
   try {
     const { barcode } = req.params;
     const locationId = req.query.locationId || 1;
-    
+
     const pool = db.getPool();
     const result = await pool.query(
       `SELECT pv.variant_id as "variantId", pv.sku, pv.barcode, pv.variant_name as "variantName", pv.price,
@@ -146,11 +146,11 @@ router.get('/barcode/:barcode', async (req, res, next) => {
        LIMIT 1`,
       [parseInt(locationId), barcode]
     );
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Product not found', barcode });
     }
-    
+
     const product = result.rows[0];
     res.json({
       variantId: product.variantId,
@@ -172,7 +172,7 @@ router.get('/barcode/:barcode', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     const productResult = await db.query(
       `SELECT p.*, c.category_name
        FROM products p
@@ -180,16 +180,16 @@ router.get('/:id', async (req, res, next) => {
        WHERE p.product_id = @id`,
       { id: parseInt(id) }
     );
-    
+
     if (productResult.recordset.length === 0) {
       throw new NotFoundError('Product not found');
     }
-    
+
     const variantsResult = await db.query(
       `SELECT * FROM product_variants WHERE product_id = @id ORDER BY variant_name`,
       { id: parseInt(id) }
     );
-    
+
     res.json({
       ...productResult.recordset[0],
       variants: variantsResult.recordset
@@ -227,18 +227,18 @@ router.get('/categories', async (req, res, next) => {
 router.post('/categories', authorize('admin', 'manager'), async (req, res, next) => {
   try {
     const { category_name, description, sort_order = 0 } = req.body;
-    
+
     if (!category_name) {
       throw new ValidationError('Category name is required');
     }
-    
+
     const result = await db.query(
       `INSERT INTO categories (category_name, description, sort_order, is_active)
        VALUES ($1, $2, $3, true)
        RETURNING *`,
       [category_name, description || null, sort_order]
     );
-    
+
     res.status(201).json(result.recordset[0]);
   } catch (error) {
     next(error);
@@ -250,11 +250,11 @@ router.put('/categories/:id', authorize('admin', 'manager'), async (req, res, ne
   try {
     const { id } = req.params;
     const { category_name, description, sort_order, is_active } = req.body;
-    
+
     if (!category_name) {
       throw new ValidationError('Category name is required');
     }
-    
+
     const result = await db.query(
       `UPDATE categories 
        SET category_name = $1, description = $2, sort_order = $3, is_active = $4
@@ -262,11 +262,11 @@ router.put('/categories/:id', authorize('admin', 'manager'), async (req, res, ne
        RETURNING *`,
       [category_name, description || null, sort_order || 0, is_active !== false, id]
     );
-    
+
     if (result.recordset.length === 0) {
       throw new NotFoundError('Category not found');
     }
-    
+
     res.json(result.recordset[0]);
   } catch (error) {
     next(error);
@@ -277,26 +277,26 @@ router.put('/categories/:id', authorize('admin', 'manager'), async (req, res, ne
 router.delete('/categories/:id', authorize('admin', 'manager'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     // Check if category has products
     const productsCheck = await db.query(
       `SELECT COUNT(*) as count FROM products WHERE category_id = $1 AND is_active = true`,
       [id]
     );
-    
+
     if (parseInt(productsCheck.recordset[0].count) > 0) {
       throw new ValidationError('Cannot delete category with active products. Please move or delete products first.');
     }
-    
+
     const result = await db.query(
       `UPDATE categories SET is_active = false WHERE category_id = $1 RETURNING *`,
       [id]
     );
-    
+
     if (result.recordset.length === 0) {
       throw new NotFoundError('Category not found');
     }
-    
+
     res.json({ message: 'Category deleted successfully' });
   } catch (error) {
     next(error);
@@ -309,16 +309,16 @@ router.get('/attributes/list', async (req, res, next) => {
     const attributesResult = await db.query(
       `SELECT * FROM attributes WHERE is_active = true ORDER BY sort_order`
     );
-    
+
     const valuesResult = await db.query(
       `SELECT * FROM attribute_values WHERE is_active = true ORDER BY sort_order`
     );
-    
+
     const attributes = attributesResult.recordset.map(attr => ({
       ...attr,
       values: valuesResult.recordset.filter(v => v.attribute_id === attr.attribute_id)
     }));
-    
+
     res.json(attributes);
   } catch (error) {
     next(error);
@@ -336,18 +336,18 @@ router.post('/', authorize('products'), [
     if (!errors.isEmpty()) {
       throw new ValidationError('Validation failed', errors.array());
     }
-    
+
     // Support both frontend field names (name/code) and backend field names (productName/productCode)
     const { productCode, productName, name, code, categoryId, category_id, description, basePrice, costPrice, taxRate, barcode, initialStock, initial_stock } = req.body;
     const finalName = productName || name;
     const finalCode = productCode || code || `PRD-${Date.now()}`;
     const finalCategoryId = categoryId || category_id || null;
     const finalInitialStock = initialStock || initial_stock || 0;
-    
+
     if (!finalName) {
       throw new ValidationError('Product name is required');
     }
-    
+
     // Create the product
     const result = await db.query(
       `INSERT INTO products (product_code, product_name, category_id, description, base_price, cost_price, tax_rate, created_by)
@@ -355,9 +355,9 @@ router.post('/', authorize('products'), [
        RETURNING *`,
       [finalCode, finalName, finalCategoryId, description || null, basePrice, costPrice || 0, taxRate || 0, req.user.user_id]
     );
-    
+
     const product = result.recordset[0];
-    
+
     // Create a default variant for this product
     const variantResult = await db.query(
       `INSERT INTO product_variants (product_id, sku, variant_name, price, cost_price, is_active)
@@ -365,9 +365,9 @@ router.post('/', authorize('products'), [
        RETURNING *`,
       [product.product_id, finalCode, 'Default', basePrice, costPrice || 0]
     );
-    
+
     const variant = variantResult.recordset[0];
-    
+
     // If initial stock is provided, create inventory record for the variant
     if (finalInitialStock && parseInt(finalInitialStock) > 0) {
       await db.query(
@@ -378,7 +378,7 @@ router.post('/', authorize('products'), [
         [variant.variant_id, req.user.default_location_id || 1, parseInt(finalInitialStock)]
       );
     }
-    
+
     res.status(201).json({ ...product, variant });
   } catch (error) {
     next(error);
@@ -390,15 +390,15 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { productName, name, code, productCode, categoryId, category_id, description, basePrice, costPrice, taxRate, isActive, barcode, initialStock, initial_stock, stock } = req.body;
-    
+
     const finalName = productName || name;
     const finalCategoryId = categoryId || category_id;
     const finalCode = code || productCode;
     const finalStock = stock ?? initialStock ?? initial_stock;
-    
+
     console.log('PUT /products/:id - Request body:', JSON.stringify(req.body));
     console.log('PUT /products/:id - Parsed values:', { id, finalName, finalCode, basePrice, costPrice, isActive, finalStock, stockFromBody: stock });
-    
+
     const result = await db.query(
       `UPDATE products 
        SET product_name = COALESCE(@finalName, product_name),
@@ -414,29 +414,29 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
        RETURNING *`,
       { finalName, finalCode, finalCategoryId, description, basePrice, costPrice, taxRate, isActive, productId: parseInt(id) }
     );
-    
+
     if (result.recordset.length === 0) {
       throw new NotFoundError('Product not found');
     }
-    
+
     const p = result.recordset[0];
-    
+
     // Update stock if provided
     if (finalStock !== null && finalStock !== undefined) {
       const stockQty = parseInt(finalStock);
       const locationId = req.user?.default_location_id || 1;
-      
+
       console.log('Stock update requested:', { productId: id, stockQty, locationId });
-      
+
       // Get the default variant for this product using pool directly
       const pool = db.getPool();
       const variantResult = await pool.query(
         `SELECT variant_id FROM product_variants WHERE product_id = $1 LIMIT 1`,
         [parseInt(id)]
       );
-      
+
       let variantId;
-      
+
       if (variantResult.rows.length > 0) {
         variantId = variantResult.rows[0].variant_id;
         console.log('Found existing variant:', variantId);
@@ -452,13 +452,13 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
         variantId = newVariantResult.rows[0].variant_id;
         console.log('Created new variant:', variantId);
       }
-      
+
       // Check if inventory record exists
       const existingInventory = await pool.query(
         `SELECT inventory_id FROM inventory WHERE variant_id = $1 AND location_id = $2`,
         [variantId, locationId]
       );
-      
+
       if (existingInventory.rows.length > 0) {
         // Update existing inventory record
         console.log('Updating existing inventory record');
@@ -476,10 +476,10 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
           [variantId, locationId, stockQty]
         );
       }
-      
+
       console.log('Stock update completed successfully');
     }
-    
+
     // Get updated total stock
     const pool = db.getPool();
     const stockResult = await pool.query(
@@ -489,10 +489,10 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
        WHERE pv.product_id = $1`,
       [parseInt(id)]
     );
-    
+
     const finalTotalStock = parseInt(stockResult.rows[0]?.total_stock) || 0;
     console.log('Final total stock:', finalTotalStock);
-    
+
     // Return transformed response matching GET format
     res.json({
       id: p.product_id,
@@ -516,23 +516,23 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
 router.delete('/:id', authorize('products'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     // Soft delete - set is_active to false
     const result = await db.query(
       `UPDATE products SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE product_id = $1 RETURNING *`,
       [parseInt(id)]
     );
-    
+
     if (result.recordset.length === 0) {
       throw new NotFoundError('Product not found');
     }
-    
+
     // Also deactivate variants
     await db.query(
       `UPDATE product_variants SET is_active = false WHERE product_id = $1`,
       [parseInt(id)]
     );
-    
+
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     next(error);

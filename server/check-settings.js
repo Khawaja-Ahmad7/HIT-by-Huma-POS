@@ -1,8 +1,8 @@
 const { Pool } = require('pg');
 
-const pool = new Pool({ 
-  connectionString: process.env.DATABASE_URL, 
-  ssl: { rejectUnauthorized: false } 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
 async function run() {
@@ -10,7 +10,7 @@ async function run() {
     // Get threshold
     const threshold = await pool.query('SELECT setting_value FROM settings WHERE setting_key = $1', ['low_stock_threshold']);
     console.log('Threshold:', threshold.rows[0]?.setting_value);
-    
+
     // Get inventory with threshold applied
     const inv = await pool.query(`
       SELECT p.product_name, i.quantity_on_hand, 

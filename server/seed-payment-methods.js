@@ -10,7 +10,7 @@ const pool = new Pool({
 async function seedPaymentMethods() {
   try {
     console.log('Connecting to database...');
-    
+
     // Check if payment_methods table exists
     const tableCheck = await pool.query(`
       SELECT EXISTS (
@@ -18,7 +18,7 @@ async function seedPaymentMethods() {
         WHERE table_name = 'payment_methods'
       )
     `);
-    
+
     if (!tableCheck.rows[0].exists) {
       console.log('Creating payment_methods table...');
       await pool.query(`
@@ -34,10 +34,10 @@ async function seedPaymentMethods() {
         )
       `);
     }
-    
+
     // Check if data exists
     const existingCheck = await pool.query('SELECT COUNT(*) FROM payment_methods');
-    
+
     if (parseInt(existingCheck.rows[0].count) > 0) {
       console.log('Payment methods already exist:', existingCheck.rows[0].count);
       const methods = await pool.query('SELECT * FROM payment_methods ORDER BY sort_order');
@@ -54,11 +54,11 @@ async function seedPaymentMethods() {
         ('EasyPaisa', 'ONLINE', true, true, false, 6)
       `);
       console.log('Payment methods inserted successfully!');
-      
+
       const methods = await pool.query('SELECT * FROM payment_methods ORDER BY sort_order');
       console.log('Inserted payment methods:', methods.rows);
     }
-    
+
     await pool.end();
     console.log('Done!');
   } catch (error) {
