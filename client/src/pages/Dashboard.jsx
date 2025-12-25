@@ -113,7 +113,7 @@ export default function Dashboard() {
     itemsSold: parseInt(dashboardData?.itemsSold) || parseInt(today.itemsSold) || parseInt(today.ItemsSold) || 0,
     returns: 0,
     avgItemsPerOrder: dashboardData?.totalOrders > 0
-      ? ((dashboardData?.itemsSold || 0) / dashboardData.totalOrders).toFixed(1)
+      ? (dashboardData?.itemsSold || 0) / dashboardData.totalOrders
       : 0
   };
 
