@@ -61,17 +61,28 @@ export const useCartStore = create(
         set({ items: get().items.filter(item => item.variantId !== variantId) });
       },
 
-      // Update item quantity
+      // Update item quantity (with stock validation)
       updateQuantity: (variantId, quantity) => {
         if (quantity <= 0) {
           get().removeItem(variantId);
-          return;
+          return true;
+        }
+
+        // Find the item and check stock limit
+        const currentItem = get().items.find(item => item.variantId === variantId);
+        if (!currentItem) return false;
+
+        // Check if trying to increase beyond stock
+        const stock = currentItem.stock ?? Infinity;
+        if (quantity > stock) {
+          return false; // Can't exceed stock
         }
 
         const items = get().items.map(item =>
           item.variantId === variantId ? { ...item, quantity } : item
         );
         set({ items });
+        return true;
       },
 
       // Update item price (with manager override)
