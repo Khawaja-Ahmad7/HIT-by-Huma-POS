@@ -34,7 +34,8 @@ const allNavItems = [
 export default function Layout() {
   const navigate = useNavigate();
   const { user, logout, currentShift, isSalesman } = useAuthStore();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // Mobile sidebar
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // Desktop sidebar
   const [activeShift, setActiveShift] = useState(null);
 
   // Get user role
@@ -94,18 +95,20 @@ export default function Layout() {
 
       {/* Sidebar */}
       <aside className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 transform transition-transform duration-300 ease-in-out
+        fixed inset-y-0 left-0 z-50 bg-gray-900 transform transition-all duration-300 ease-in-out
         lg:static lg:translate-x-0
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}
+        w-64
       `}>
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="flex items-center justify-between h-16 px-4 bg-gray-800">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center">
+            <div className={`flex items-center space-x-3 ${sidebarCollapsed ? 'lg:justify-center lg:space-x-0' : ''}`}>
+              <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0">
                 <span className="text-white font-bold text-lg">H</span>
               </div>
-              <div>
+              <div className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                 <h1 className="text-white font-display font-bold">HIT BY HUMA</h1>
                 <p className="text-gray-400 text-xs">Point of Sale</p>
               </div>
@@ -119,13 +122,13 @@ export default function Layout() {
           </div>
 
           {/* Shift Status */}
-          <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-700">
-            <div className={`flex items-center text-sm ${activeShift || currentShift ? 'text-green-400' : 'text-gray-400'}`}>
-              <ClockIcon className="w-4 h-4 mr-2" />
-              <span>{activeShift || currentShift ? 'Shift Active' : 'No Active Shift'}</span>
+          <div className={`px-4 py-3 bg-gray-800/50 border-b border-gray-700 ${sidebarCollapsed ? 'lg:px-2' : ''}`}>
+            <div className={`flex items-center text-sm ${activeShift || currentShift ? 'text-green-400' : 'text-gray-400'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
+              <ClockIcon className={`w-4 h-4 ${sidebarCollapsed ? '' : 'mr-2'}`} />
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>{activeShift || currentShift ? 'Shift Active' : 'No Active Shift'}</span>
             </div>
             {isUserSalesman && (
-              <div className="text-xs text-yellow-400 mt-1">
+              <div className={`text-xs text-yellow-400 mt-1 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                 Salesman Mode
               </div>
             )}
@@ -142,15 +145,17 @@ export default function Layout() {
                   onClick={() => setSidebarOpen(false)}
                   className={({ isActive }) => `
                     flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-colors
+                    ${sidebarCollapsed ? 'lg:justify-center lg:px-2' : ''}
                     ${isActive
                       ? 'bg-primary-600 text-white'
                       : 'text-gray-300 hover:bg-gray-800 hover:text-white'}
                   `}
+                  title={sidebarCollapsed ? item.name : ''}
                 >
-                  <item.icon className="w-5 h-5 mr-3" />
-                  <span className="flex-1">{item.name}</span>
+                  <item.icon className={`w-5 h-5 ${sidebarCollapsed ? '' : 'mr-3'} flex-shrink-0`} />
+                  <span className={`flex-1 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>{item.name}</span>
                   {isViewOnly && (
-                    <EyeIcon className="w-4 h-4 text-yellow-400" title="View Only" />
+                    <EyeIcon className={`w-4 h-4 text-yellow-400 ${sidebarCollapsed ? 'lg:hidden' : ''}`} title="View Only" />
                   )}
                 </NavLink>
               );
@@ -158,15 +163,15 @@ export default function Layout() {
           </nav>
 
           {/* User Info */}
-          <div className="p-4 border-t border-gray-700">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
+          <div className={`p-4 border-t border-gray-700 ${sidebarCollapsed ? 'lg:p-2' : ''}`}>
+            <div className={`flex items-center ${sidebarCollapsed ? 'lg:flex-col lg:space-y-2' : 'justify-between'}`}>
+              <div className={`flex items-center ${sidebarCollapsed ? 'lg:flex-col lg:w-full' : ''}`}>
+                <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center flex-shrink-0">
                   <span className="text-primary-400 font-semibold">
                     {getUserInitial()}
                   </span>
                 </div>
-                <div className="ml-3">
+                <div className={`ml-3 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                   <p className="text-white text-sm font-medium">
                     {getUserDisplayName()}
                   </p>
@@ -175,7 +180,7 @@ export default function Layout() {
               </div>
               <button
                 onClick={handleLogout}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                className={`p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors ${sidebarCollapsed ? 'lg:w-full lg:flex lg:justify-center' : ''}`}
                 title="Logout"
               >
                 <ArrowRightOnRectangleIcon className="w-5 h-5" />
@@ -184,6 +189,20 @@ export default function Layout() {
           </div>
         </div>
       </aside>
+
+      {/* Desktop Toggle Button - Always Visible */}
+      <button
+        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        className="hidden lg:flex fixed top-4 left-4 z-50 p-2 bg-gray-900 text-white rounded-lg shadow-lg hover:bg-gray-800 transition-all duration-300"
+        style={{ left: sidebarCollapsed ? '88px' : '272px' }}
+        title={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+      >
+        {sidebarCollapsed ? (
+          <Bars3Icon className="w-5 h-5" />
+        ) : (
+          <XMarkIcon className="w-5 h-5" />
+        )}
+      </button>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0">
