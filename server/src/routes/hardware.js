@@ -42,15 +42,32 @@ router.post('/printer/receipt', authorize('pos'), async (req, res) => {
 
 // Print label (mock for cloud deployment)
 router.post('/label/print', authorize('inventory'), async (req, res) => {
-  const { barcode, productName, price, quantity } = req.body;
+  const { barcode, productName, price, quantity, sku } = req.body;
 
   console.log('Label print requested:', { barcode, productName, quantity });
 
   try {
-    const result = await printerService.printLabel({ sku: barcode || productName, barcode, name: productName, price, quantity });
-    res.json({ success: true, printed: !!result, labels: quantity || 1 });
+    const result = await printerService.printLabel({
+      sku: sku || barcode || productName,
+      barcode,
+      name: productName,
+      price,
+      quantity
+    });
+
+    res.json({
+      success: true,
+      printed: result.printed || false,
+      labels: quantity || 1,
+      method: result.isCloudMode ? 'cloud' : 'usb',
+      message: result.printed ? `Printed ${quantity || 1} label(s)` : 'Use browser print fallback'
+    });
   } catch (error) {
-    res.status(500).json({ success: false, printed: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      printed: false,
+      message: error.message
+    });
   }
 });
 

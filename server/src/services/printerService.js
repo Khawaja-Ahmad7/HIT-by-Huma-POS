@@ -33,7 +33,7 @@ class PrinterService {
       logger.info('Running in cloud mode - printer hardware not available');
       return false;
     }
-    
+
     try {
       this.printer = new ThermalPrinter({
         type: PrinterTypes.EPSON,
@@ -48,7 +48,7 @@ class PrinterService {
 
       this.isConnected = await this.printer.isPrinterConnected();
       logger.info(`Thermal printer connection: ${this.isConnected ? 'SUCCESS' : 'FAILED'}`);
-      
+
       return this.isConnected;
     } catch (error) {
       logger.error('Printer initialization failed:', error);
@@ -89,14 +89,14 @@ class PrinterService {
         message: 'Printer hardware not available in cloud deployment',
       };
     }
-    
+
     try {
       if (!this.printer) {
         await this.initialize();
       }
-      
+
       const connected = await this.printer.isPrinterConnected();
-      
+
       if (connected) {
         // Print test receipt
         this.printer.alignCenter();
@@ -105,11 +105,11 @@ class PrinterService {
         this.printer.println(new Date().toLocaleString());
         this.printer.println('Connection: OK');
         this.printer.cut();
-        
+
         await this.printer.execute();
         this.printer.clear();
       }
-      
+
       return {
         connected,
         printerType: 'EPSON TM-T88V',
@@ -145,7 +145,7 @@ class PrinterService {
       this.printer.setTextSize(1, 1);
       this.printer.bold(false);
       this.printer.println('================================');
-      
+
       // Store Info
       this.printer.println(sale.LocationName || '');
       this.printer.println(sale.LocationAddress || '');
@@ -157,12 +157,12 @@ class PrinterService {
       this.printer.println(`Receipt: ${sale.SaleNumber}`);
       this.printer.println(`Date: ${new Date(sale.CreatedAt).toLocaleString()}`);
       this.printer.println(`Cashier: ${sale.CashierFirstName} ${sale.CashierLastName || ''}`);
-      
+
       if (sale.CustomerFirstName) {
         this.printer.println(`Customer: ${sale.CustomerFirstName} ${sale.CustomerLastName || ''}`);
         this.printer.println(`Phone: ${sale.CustomerPhone || ''}`);
       }
-      
+
       this.printer.println('--------------------------------');
 
       // Items
@@ -177,21 +177,21 @@ class PrinterService {
 
       for (const item of items) {
         const productName = item.VariantName || item.ProductName;
-        const truncatedName = productName.length > 20 
-          ? productName.substring(0, 17) + '...' 
+        const truncatedName = productName.length > 20
+          ? productName.substring(0, 17) + '...'
           : productName;
-        
+
         this.printer.tableCustom([
           { text: truncatedName, align: 'LEFT', width: 0.5 },
           { text: String(item.Quantity), align: 'CENTER', width: 0.15 },
           { text: this.formatAmount(item.LineTotal), align: 'RIGHT', width: 0.35 },
         ]);
-        
+
         // Show unit price if quantity > 1
         if (item.Quantity > 1) {
           this.printer.println(`  @ ${this.formatAmount(item.UnitPrice)} each`);
         }
-        
+
         // Show discount if any
         if (item.DiscountAmount > 0) {
           this.printer.println(`  Discount: -${this.formatAmount(item.DiscountAmount)}`);
@@ -240,7 +240,7 @@ class PrinterService {
           { text: `  ${payment.MethodName}:`, align: 'LEFT', width: 0.5 },
           { text: this.formatAmount(payment.Amount), align: 'RIGHT', width: 0.5 },
         ]);
-        
+
         if (payment.TenderedAmount && payment.ChangeAmount > 0) {
           this.printer.println(`  Tendered: ${this.formatAmount(payment.TenderedAmount)}`);
           this.printer.println(`  Change: ${this.formatAmount(payment.ChangeAmount)}`);
@@ -260,12 +260,12 @@ class PrinterService {
       this.printer.println('Exchange within 7 days with receipt');
       this.printer.println('No cash refunds');
       this.printer.println('');
-      
+
       // Barcode for receipt lookup
       if (sale.SaleNumber) {
         this.printer.printBarcode(sale.SaleNumber.replace(/-/g, ''));
       }
-      
+
       this.printer.println('');
       this.printer.println('================================');
 
@@ -312,6 +312,7 @@ class PrinterService {
 
   /**
    * Print product label
+   * Horizontal format for adhesive label printers (MediaLink, etc.)
    */
   async printLabel(data) {
     try {
@@ -322,38 +323,48 @@ class PrinterService {
       const { sku, barcode, name, price, quantity = 1 } = data;
 
       for (let i = 0; i < quantity; i++) {
-        // Label format for standard sticky labels
-        this.printer.alignCenter();
-        
-        // Company name
+        // Horizontal label format (landscape orientation)
+        // Layout:
+        // Product Name (top left)
+        // SKU: xxxxx (left side)
+        // [Barcode] (center)
+        // Price (bottom right)
+
+        this.printer.alignLeft();
+
+        // Product Name - Bold, top of label
         this.printer.bold(true);
-        this.printer.println(this.companyName);
-        this.printer.bold(false);
-        
-        // Product name
-        const truncatedName = name.length > 24 ? name.substring(0, 21) + '...' : name;
+        const truncatedName = name.length > 30 ? name.substring(0, 27) + '...' : name;
         this.printer.println(truncatedName);
-        
-        // Price
-        this.printer.setTextSize(2, 1);
+        this.printer.bold(false);
+
+        // SKU on left side
+        this.printer.println(`SKU: ${sku || barcode || 'N/A'}`);
+
+        // Barcode - centered, smaller height
+        if (barcode) {
+          this.printer.alignCenter();
+          // Print barcode with reduced height (compact)
+          this.printer.printBarcode(barcode, {
+            width: 2,      // Narrower bars
+            height: 40     // Shorter height (small barcode)
+          });
+          this.printer.println(''); // Space after barcode
+        }
+
+        // Price - bottom right corner
+        this.printer.alignRight();
+        this.printer.setTextSize(1, 1);
         this.printer.bold(true);
         this.printer.println(this.formatAmount(price));
         this.printer.bold(false);
         this.printer.setTextSize(1, 1);
-        
-        // SKU
-        this.printer.println(`SKU: ${sku}`);
-        
-        // Barcode
-        if (barcode) {
-          this.printer.printBarcode(barcode);
-        }
-        
-        this.printer.println('');
-        
-        // Cut or feed for next label
+
+        this.printer.println(''); // Extra line for separation
+
+        // Cut for next label (or feed if continuous roll)
         if (i < quantity - 1) {
-          this.printer.cut(); // Or use partial cut for continuous labels
+          this.printer.cut(); // Use partialCut() for continuous labels
         }
       }
 
@@ -361,12 +372,18 @@ class PrinterService {
       await this.printer.execute();
       this.printer.clear();
 
-      logger.info(`Labels printed: ${quantity}x ${sku}`);
-      return true;
+      logger.info(`Labels printed: ${quantity}x ${sku || barcode}`);
+      return { printed: true, quantity };
     } catch (error) {
       logger.error('Label printing failed:', error);
       this.printer?.clear();
-      throw error;
+
+      // Return info for fallback
+      return {
+        printed: false,
+        error: error.message,
+        isCloudMode: this.isCloudMode
+      };
     }
   }
 
@@ -387,7 +404,7 @@ class PrinterService {
       this.printer.println(this.companyName);
       this.printer.bold(false);
       this.printer.println('================================');
-      
+
       this.printer.alignLeft();
       this.printer.println(`Report #: ${data.reportNumber}`);
       this.printer.println(`Location: ${data.locationName}`);
@@ -399,7 +416,7 @@ class PrinterService {
       this.printer.bold(true);
       this.printer.println('SALES SUMMARY');
       this.printer.bold(false);
-      
+
       this.printer.tableCustom([
         { text: 'Gross Sales:', align: 'LEFT', width: 0.5 },
         { text: this.formatAmount(data.grossSales), align: 'RIGHT', width: 0.5 },
@@ -431,7 +448,7 @@ class PrinterService {
       this.printer.bold(true);
       this.printer.println('PAYMENT BREAKDOWN');
       this.printer.bold(false);
-      
+
       this.printer.tableCustom([
         { text: 'Cash:', align: 'LEFT', width: 0.5 },
         { text: this.formatAmount(data.cashTotal), align: 'RIGHT', width: 0.5 },
@@ -450,7 +467,7 @@ class PrinterService {
       this.printer.bold(true);
       this.printer.println('CASH RECONCILIATION');
       this.printer.bold(false);
-      
+
       this.printer.tableCustom([
         { text: 'Opening:', align: 'LEFT', width: 0.5 },
         { text: this.formatAmount(data.openingCash), align: 'RIGHT', width: 0.5 },
@@ -464,7 +481,7 @@ class PrinterService {
         { text: this.formatAmount(data.actualCash), align: 'RIGHT', width: 0.5 },
       ]);
       this.printer.println('--------------------------------');
-      
+
       const varianceStatus = Math.abs(data.variance) <= 500 ? 'OK' : 'FLAGGED';
       this.printer.bold(true);
       this.printer.tableCustom([
@@ -476,7 +493,7 @@ class PrinterService {
       this.printer.println('================================');
       this.printer.alignCenter();
       this.printer.println('*** END OF Z-REPORT ***');
-      
+
       this.printer.cut();
       await this.printer.execute();
       this.printer.clear();
