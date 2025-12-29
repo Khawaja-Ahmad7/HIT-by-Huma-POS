@@ -170,7 +170,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard
           title="Total Revenue"
-          value={`$${(stats.totalRevenue || 0).toLocaleString()}`}
+          value={`Rs. ${(stats.totalRevenue || 0).toLocaleString()}`}
           change={stats.revenueChange}
           icon={CurrencyDollarIcon}
           iconBg="bg-green-100"
@@ -188,7 +188,7 @@ export default function Dashboard() {
         />
         <MetricCard
           title="Average Order Value"
-          value={`$${(stats.avgOrderValue || 0).toFixed(2)}`}
+          value={`Rs. ${(stats.avgOrderValue || 0).toFixed(2)}`}
           change={stats.avgOrderChange}
           icon={ChartBarIcon}
           iconBg="bg-purple-100"
@@ -215,17 +215,17 @@ export default function Dashboard() {
         />
         <MiniMetricCard
           label="Discounts Given"
-          value={`$${(stats.totalDiscounts || 0).toFixed(2)}`}
+          value={`Rs. ${(stats.totalDiscounts || 0).toFixed(2)}`}
           icon={ReceiptPercentIcon}
         />
         <MiniMetricCard
           label="Cash Sales"
-          value={`$${(stats.cashSales || 0).toLocaleString()}`}
+          value={`Rs. ${(stats.cashSales || 0).toLocaleString()}`}
           icon={BanknotesIcon}
         />
         <MiniMetricCard
           label="Card Sales"
-          value={`$${(stats.cardSales || 0).toLocaleString()}`}
+          value={`Rs. ${(stats.cardSales || 0).toLocaleString()}`}
           icon={CreditCardIcon}
         />
         <MiniMetricCard
@@ -273,7 +273,7 @@ export default function Dashboard() {
                     <div key={i} className="flex-1 flex flex-col items-center group relative">
                       {/* Tooltip */}
                       <div className="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-10">
-                        <p>${sales.toFixed(2)}</p>
+                        <p>Rs. {sales.toFixed(2)}</p>
                         <p>{hour.orders || hour.transactions || 0} orders</p>
                       </div>
                       <div
@@ -324,7 +324,7 @@ export default function Dashboard() {
                       <span className="font-medium text-gray-700">{category.name || category.category_name || category.category}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-500">
-                          ${sales.toLocaleString()}
+                          Rs. {sales.toLocaleString()}
                         </span>
                         <span className="text-xs text-gray-400">
                           ({percentage.toFixed(1)}%)
@@ -381,7 +381,7 @@ export default function Dashboard() {
                     <p className="text-xs text-gray-500">{parseInt(product.quantity || product.QuantitySold || product.sold) || 0} sold</p>
                   </div>
                   <p className="font-semibold text-gray-900">
-                    ${(parseFloat(product.revenue || product.Revenue) || 0).toLocaleString()}
+                    Rs. {(parseFloat(product.revenue || product.Revenue) || 0).toLocaleString()}
                   </p>
                 </div>
               ))
@@ -424,7 +424,7 @@ export default function Dashboard() {
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-gray-900">
-                        ${(parseFloat(employee.sales || employee.revenue) || 0).toLocaleString()}
+                        Rs. {(parseFloat(employee.sales || employee.revenue) || 0).toLocaleString()}
                       </p>
                       {i === 0 && (
                         <span className="text-xs text-yellow-600">🏆 Top</span>
@@ -552,7 +552,7 @@ export default function Dashboard() {
                       {(tx.CreatedAt || tx.created_at) ? new Date(tx.CreatedAt || tx.created_at).toLocaleTimeString() : '-'}
                     </td>
                     <td className="px-6 py-4 text-right font-semibold text-gray-900">
-                      ${(parseFloat(tx.TotalAmount || tx.total_amount) || 0).toFixed(2)}
+                      Rs. {(parseFloat(tx.TotalAmount || tx.total_amount) || 0).toFixed(2)}
                     </td>
                   </tr>
                 ))
@@ -585,7 +585,7 @@ export default function Dashboard() {
         />
         <QuickStatCard
           label="Gross Profit"
-          value={`$${(stats.grossProfit || 0).toLocaleString()}`}
+          value={`Rs. ${(stats.grossProfit || 0).toLocaleString()}`}
           sublabel="Revenue - Cost"
           icon={CurrencyDollarIcon}
         />

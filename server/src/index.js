@@ -136,13 +136,29 @@ io.on('connection', (socket) => {
   });
 });
 
-// Error Handler (must be last)
+// Error Handler (must be last middleware before static files)
 app.use(errorHandler);
 
-// 404 Handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
-});
+// Serve static files from client build in production
+const path = require('path');
+if (process.env.NODE_ENV === 'production') {
+  const clientBuildPath = path.join(__dirname, '../../client/dist');
+  app.use(express.static(clientBuildPath));
+
+  // Handle React Router - send all non-API requests to index.html
+  app.get('*', (req, res) => {
+    // Don't serve index.html for API routes
+    if (req.path.startsWith('/api') || req.path.startsWith('/health')) {
+      return res.status(404).json({ error: 'Endpoint not found' });
+    }
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+} else {
+  // 404 Handler for development
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Endpoint not found' });
+  });
+}
 
 // Start Server
 const PORT = process.env.PORT || 5000;

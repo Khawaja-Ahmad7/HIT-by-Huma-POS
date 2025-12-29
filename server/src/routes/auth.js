@@ -57,38 +57,36 @@ router.post('/login', [
       permissions = {};
     }
 
-    // Check if user is a salesman - auto-start shift on login
+    // Auto-start shift for all non-admin users on login
     let shift = null;
     const isSalesman = user.role_name === 'salesman';
+    const shouldAutoStartShift = user.role_name !== 'admin'; // All non-admin users get auto shifts
 
-    if (isSalesman) {
+    if (shouldAutoStartShift) {
+      const pool = db.getPool();
+
       // Check if user already has an open shift
-      const openShiftResult = await db.query(
-        `SELECT * FROM shifts WHERE user_id = @userId AND status = 'open'`,
-        { userId: user.user_id }
+      const openShiftResult = await pool.query(
+        `SELECT * FROM shifts WHERE user_id = $1 AND status = 'open'`,
+        [user.user_id]
       );
 
-      if (openShiftResult.recordset.length > 0) {
+      if (openShiftResult.rows.length > 0) {
         // Use existing open shift
-        shift = openShiftResult.recordset[0];
+        shift = openShiftResult.rows[0];
       } else {
-        // Auto-create a new shift for salesman
-        const userLocationId = locationId || user.default_location_id;
+        // Auto-create a new shift
+        const userLocationId = locationId || user.default_location_id || 1;
         const cashAmount = parseFloat(openingCash) || 0;
 
-        if (userLocationId) {
-          const shiftResult = await db.query(
-            `INSERT INTO shifts (user_id, location_id, opening_cash, status, start_time)
-             OUTPUT INSERTED.*
-             VALUES (@userId, @locationId, @openingCash, 'open', CURRENT_TIMESTAMP)`,
-            {
-              userId: user.user_id,
-              locationId: userLocationId,
-              openingCash: cashAmount
-            }
-          );
-          shift = shiftResult.recordset[0];
-        }
+        const shiftResult = await pool.query(
+          `INSERT INTO shifts (user_id, location_id, opening_cash, status, start_time)
+           VALUES ($1, $2, $3, 'open', CURRENT_TIMESTAMP)
+           RETURNING *`,
+          [user.user_id, userLocationId, cashAmount]
+        );
+        shift = shiftResult.rows[0];
+        console.log(`Shift auto-started for user ${user.employee_code}`);
       }
     }
 
@@ -132,61 +130,57 @@ router.post('/login', [
   }
 });
 
-// Logout - close shift for salesmen
+// Logout - close shift for all users
 router.post('/logout', authenticate, async (req, res, next) => {
   try {
     const user = req.user;
     const { closingCash } = req.body;
+    const pool = db.getPool();
 
-    // Check if user is a salesman with an open shift
-    if (user.role_name === 'salesman') {
-      const openShiftResult = await db.query(
-        `SELECT s.*, 
-                ISNULL((SELECT SUM(sp.amount) 
-                        FROM sales sa 
-                        INNER JOIN sale_payments sp ON sa.sale_id = sp.sale_id
-                        INNER JOIN payment_methods pm ON sp.payment_method_id = pm.payment_method_id
-                        WHERE sa.shift_id = s.shift_id AND pm.method_type = 'CASH'), 0) as cash_sales
-         FROM shifts s 
-         WHERE s.user_id = @userId AND s.status = 'open'`,
-        { userId: user.user_id }
+    // Check if user has an open shift (for all non-admin users)
+    const openShiftResult = await pool.query(
+      `SELECT s.*, 
+              COALESCE((SELECT SUM(sp.amount) 
+                      FROM sales sa 
+                      INNER JOIN sale_payments sp ON sa.sale_id = sp.sale_id
+                      INNER JOIN payment_methods pm ON sp.payment_method_id = pm.payment_method_id
+                      WHERE sa.shift_id = s.shift_id AND pm.method_type = 'cash'), 0) as cash_sales
+       FROM shifts s 
+       WHERE s.user_id = $1 AND s.status = 'open'`,
+      [user.user_id]
+    );
+
+    if (openShiftResult.rows.length > 0) {
+      const shift = openShiftResult.rows[0];
+      const expectedCash = parseFloat(shift.opening_cash) + parseFloat(shift.cash_sales || 0);
+      const actualCash = parseFloat(closingCash) || expectedCash;
+      const cashDifference = actualCash - expectedCash;
+
+      // Close the shift
+      await pool.query(
+        `UPDATE shifts SET 
+          closing_cash = $1,
+          expected_cash = $2,
+          cash_difference = $3,
+          end_time = CURRENT_TIMESTAMP,
+          status = 'closed'
+         WHERE shift_id = $4`,
+        [actualCash, expectedCash, cashDifference, shift.shift_id]
       );
 
-      if (openShiftResult.recordset.length > 0) {
-        const shift = openShiftResult.recordset[0];
-        const expectedCash = parseFloat(shift.opening_cash) + parseFloat(shift.cash_sales || 0);
-        const actualCash = parseFloat(closingCash) || expectedCash;
-        const cashDifference = actualCash - expectedCash;
+      console.log(`Shift closed for user ${user.employee_code}`);
 
-        // Close the shift
-        await db.query(
-          `UPDATE shifts SET 
-            closing_cash = @closingCash,
-            expected_cash = @expectedCash,
-            cash_difference = @cashDifference,
-            end_time = CURRENT_TIMESTAMP,
-            status = 'closed'
-           WHERE shift_id = @shiftId`,
-          {
-            closingCash: actualCash,
-            expectedCash,
-            cashDifference,
-            shiftId: shift.shift_id
-          }
-        );
-
-        return res.json({
-          success: true,
-          message: 'Logged out and shift closed',
-          shiftSummary: {
-            openingCash: shift.opening_cash,
-            cashSales: shift.cash_sales,
-            expectedCash,
-            closingCash: actualCash,
-            difference: cashDifference
-          }
-        });
-      }
+      return res.json({
+        success: true,
+        message: 'Logged out and shift closed',
+        shiftSummary: {
+          openingCash: shift.opening_cash,
+          cashSales: shift.cash_sales,
+          expectedCash,
+          closingCash: actualCash,
+          difference: cashDifference
+        }
+      });
     }
 
     res.json({ success: true, message: 'Logged out successfully' });

@@ -10,7 +10,8 @@ import {
   CalendarIcon,
   PrinterIcon,
   ArrowDownTrayIcon,
-  ClockIcon
+  ClockIcon,
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 
@@ -32,7 +33,7 @@ export default function Reports() {
   };
 
   // Fetch dashboard data (sales summary)
-  const { data: dashboardData, isLoading: summaryLoading } = useQuery({
+  const { data: dashboardData, isLoading: summaryLoading, refetch } = useQuery({
     queryKey: ['reports-dashboard', dateRange, startDate, endDate],
     queryFn: () => api.get(`/reports/dashboard?${getDateParams()}`).then(res => res.data)
   });
@@ -114,6 +115,13 @@ export default function Reports() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => refetch()}
+            className="p-2 bg-white border rounded-lg hover:bg-gray-50 transition-colors"
+            title="Refresh"
+          >
+            <ArrowPathIcon className="w-5 h-5 text-gray-600" />
+          </button>
+          <button
             onClick={() => handleExport('pdf')}
             className="btn btn-secondary flex items-center gap-2"
           >
@@ -148,11 +156,10 @@ export default function Reports() {
             <button
               key={option.value}
               onClick={() => setDateRange(option.value)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateRange === option.value
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateRange === option.value
                   ? 'bg-primary-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               {option.label}
             </button>
@@ -287,12 +294,11 @@ export default function Reports() {
                   key={i}
                   className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg"
                 >
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
-                    i === 0 ? 'bg-yellow-400 text-yellow-900' :
-                    i === 1 ? 'bg-gray-300 text-gray-700' :
-                    i === 2 ? 'bg-amber-600 text-white' :
-                    'bg-gray-200 text-gray-600'
-                  }`}>
+                  <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${i === 0 ? 'bg-yellow-400 text-yellow-900' :
+                      i === 1 ? 'bg-gray-300 text-gray-700' :
+                        i === 2 ? 'bg-amber-600 text-white' :
+                          'bg-gray-200 text-gray-600'
+                    }`}>
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -356,7 +362,7 @@ export default function Reports() {
             paymentMethods.map((method, i) => (
               <div key={i} className="p-4 bg-gray-50 rounded-lg text-center">
                 <p className="text-2xl font-bold text-gray-900">
-                  ${parseFloat(method.amount || 0).toLocaleString()}
+                  Rs. {parseFloat(method.amount || 0).toLocaleString()}
                 </p>
                 <p className="text-sm text-gray-500 capitalize">{method.type}</p>
               </div>
@@ -395,10 +401,9 @@ function SummaryCard({ title, value, change, icon: Icon, loading }) {
           </div>
           <p className="text-3xl font-bold text-gray-900 mb-2">{value}</p>
           {change !== undefined && (
-            <div className={`flex items-center gap-1 text-sm ${
-              isPositive ? 'text-green-600' :
-              isNegative ? 'text-red-600' : 'text-gray-500'
-            }`}>
+            <div className={`flex items-center gap-1 text-sm ${isPositive ? 'text-green-600' :
+                isNegative ? 'text-red-600' : 'text-gray-500'
+              }`}>
               {isPositive ? (
                 <ArrowTrendingUpIcon className="w-4 h-4" />
               ) : isNegative ? (

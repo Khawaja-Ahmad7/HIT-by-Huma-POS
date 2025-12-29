@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Industry-ready POS System for HIT BY HUMA - Multi-location retail with hardware integration",
   "private": true,
+  "main": "electron/main.js",
   "workspaces": [
     "client",
     "server"
@@ -15,14 +16,60 @@
     "build": "cd client && npm run build",
     "start": "cd server && npm start",
     "db:migrate": "cd server && npm run migrate",
-    "db:seed": "cd server && npm run seed"
+    "db:seed": "cd server && npm run seed",
+    "electron:dev": "electron .",
+    "electron:build": "npm run build && electron-builder --win",
+    "electron:pack": "electron-builder --win --dir"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "author": "HIT BY HUMA",
-  "license": "PROPRIETARY"
+  "license": "PROPRIETARY",
+  "build": {
+    "appId": "com.hitbyhuma.pos",
+    "productName": "HIT by Huma POS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "client/dist/**/*",
+      "!**/node_modules/**",
+      "!**/.git/**"
+    ],
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "client/dist",
+        "to": "client/dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "electron/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HIT by Huma POS"
+    }
+  }
 }

@@ -352,17 +352,7 @@ FROM attributes a
 CROSS JOIN (VALUES ('XS', 1), ('S', 2), ('M', 3), ('L', 4), ('XL', 5), ('XXL', 6)) AS v(value, sort_order)
 WHERE a.attribute_name = 'Size'
 ON CONFLICT (attribute_id, value) DO NOTHING;
-
--- Insert default categories
-INSERT INTO categories (category_name, sort_order) VALUES
-('Kurtas', 1),
-('Shalwar Kameez', 2),
-('Western Wear', 3),
-('Accessories', 4),
-('Footwear', 5)
-ON CONFLICT DO NOTHING;
-
--- Insert default settings
+-- Default settings
 INSERT INTO settings (setting_key, setting_value, setting_type, description, is_public) VALUES
 ('company_name', 'HIT BY HUMA', 'string', 'Company name displayed on receipts', TRUE),
 ('currency_symbol', 'PKR', 'string', 'Currency symbol', TRUE),

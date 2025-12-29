@@ -19,11 +19,11 @@ router.get('/current', async (req, res, next) => {
        LIMIT 1`,
       { userId: req.user.user_id }
     );
-    
+
     if (result.recordset.length === 0) {
       return res.json({ hasActiveShift: false });
     }
-    
+
     // Get shift stats
     const shift = result.recordset[0];
     const statsResult = await db.query(
@@ -34,9 +34,9 @@ router.get('/current', async (req, res, next) => {
        WHERE shift_id = @shiftId AND status = 'completed'`,
       { shiftId: shift.shift_id }
     );
-    
-    res.json({ 
-      hasActiveShift: true, 
+
+    res.json({
+      hasActiveShift: true,
       shift: {
         ...shift,
         ...statsResult.recordset[0]
@@ -57,31 +57,31 @@ router.post('/clock-in', [
     if (!errors.isEmpty()) {
       throw new ValidationError('Validation failed', errors.array());
     }
-    
+
     const { locationId, openingCash, terminalId } = req.body;
-    
+
     // Check for existing active shift
     const existing = await db.query(
       `SELECT shift_id FROM shifts WHERE user_id = @userId AND status = 'active'`,
       { userId: req.user.user_id }
     );
-    
+
     if (existing.recordset.length > 0) {
       throw new ValidationError('You already have an active shift');
     }
-    
+
     const result = await db.query(
       `INSERT INTO shifts (user_id, location_id, terminal_id, opening_cash, status)
        VALUES (@userId, @locationId, @terminalId, @openingCash, 'active')
        RETURNING *`,
-      { 
-        userId: req.user.user_id, 
-        locationId, 
-        terminalId: terminalId || null, 
-        openingCash 
+      {
+        userId: req.user.user_id,
+        locationId,
+        terminalId: terminalId || null,
+        openingCash
       }
     );
-    
+
     res.status(201).json({ success: true, shift: result.recordset[0] });
   } catch (error) {
     next(error);
@@ -98,9 +98,9 @@ router.post('/clock-out', [
     if (!errors.isEmpty()) {
       throw new ValidationError('Validation failed', errors.array());
     }
-    
+
     const { shiftId, closingCash, notes } = req.body;
-    
+
     // Get shift details and calculate expected cash
     const shiftResult = await db.query(
       `SELECT s.*, 
@@ -115,15 +115,15 @@ router.post('/clock-out', [
                 s.end_time, s.status, s.notes, s.created_at`,
       { shiftId }
     );
-    
+
     if (shiftResult.recordset.length === 0) {
       throw new NotFoundError('Shift not found');
     }
-    
+
     const shift = shiftResult.recordset[0];
     const expectedCash = shift.opening_cash + shift.cash_sales;
     const cashDifference = closingCash - expectedCash;
-    
+
     const result = await db.query(
       `UPDATE shifts SET 
         closing_cash = @closingCash,
@@ -136,9 +136,9 @@ router.post('/clock-out', [
        RETURNING *`,
       { shiftId, closingCash, expectedCash, cashDifference, notes: notes || null }
     );
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       shift: result.recordset[0],
       summary: {
         expectedCash,
@@ -156,30 +156,30 @@ router.get('/history', async (req, res, next) => {
   try {
     const { userId, locationId, startDate, endDate, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
-    
+
     let whereClause = 'WHERE 1=1';
     const params = { limit: parseInt(limit), offset };
-    
+
     if (userId) {
       whereClause += ' AND s.user_id = @userId';
       params.userId = parseInt(userId);
     }
-    
+
     if (locationId) {
       whereClause += ' AND s.location_id = @locationId';
       params.locationId = parseInt(locationId);
     }
-    
+
     if (startDate) {
       whereClause += ' AND s.start_time >= @startDate';
       params.startDate = startDate;
     }
-    
+
     if (endDate) {
       whereClause += ' AND s.start_time <= @endDate';
       params.endDate = endDate;
     }
-    
+
     const result = await db.query(
       `SELECT s.*, u.first_name, u.last_name, l.location_name,
         (SELECT COUNT(*) FROM sales WHERE shift_id = s.shift_id AND status = 'completed') as transaction_count,
@@ -192,7 +192,7 @@ router.get('/history', async (req, res, next) => {
        LIMIT @limit OFFSET @offset`,
       params
     );
-    
+
     res.json({ shifts: result.recordset });
   } catch (error) {
     next(error);
@@ -203,7 +203,7 @@ router.get('/history', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     const shiftResult = await db.query(
       `SELECT s.*, u.first_name, u.last_name, l.location_name
        FROM shifts s
@@ -212,11 +212,11 @@ router.get('/:id', async (req, res, next) => {
        WHERE s.shift_id = @id`,
       { id: parseInt(id) }
     );
-    
+
     if (shiftResult.recordset.length === 0) {
       throw new NotFoundError('Shift not found');
     }
-    
+
     // Get sales summary
     const salesResult = await db.query(
       `SELECT 
@@ -227,7 +227,7 @@ router.get('/:id', async (req, res, next) => {
        WHERE shift_id = @id AND status = 'completed'`,
       { id: parseInt(id) }
     );
-    
+
     // Get payments by method
     const paymentsResult = await db.query(
       `SELECT pm.method_name, COALESCE(SUM(sp.amount), 0) as total
@@ -238,7 +238,7 @@ router.get('/:id', async (req, res, next) => {
        GROUP BY pm.method_name`,
       { id: parseInt(id) }
     );
-    
+
     res.json({
       shift: shiftResult.recordset[0],
       summary: salesResult.recordset[0],
@@ -254,15 +254,99 @@ router.post('/:id/reconcile', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { notes } = req.body;
-    
+
     await db.query(
       `UPDATE shifts SET status = 'reconciled', notes = COALESCE(@notes, notes)
        WHERE shift_id = @id`,
       { id: parseInt(id), notes }
     );
-    
+
     res.json({ success: true });
   } catch (error) {
+    next(error);
+  }
+});
+
+// Get all shifts for calendar view (admin only)
+router.get('/calendar/month', async (req, res, next) => {
+  try {
+    const { month, year } = req.query;
+    const currentDate = new Date();
+    const targetMonth = parseInt(month) || (currentDate.getMonth() + 1);
+    const targetYear = parseInt(year) || currentDate.getFullYear();
+
+    const pool = db.getPool();
+
+    // Get all shifts for the specified month
+    const result = await pool.query(
+      `SELECT 
+        s.shift_id,
+        s.user_id,
+        s.start_time,
+        s.end_time,
+        s.status,
+        s.opening_cash,
+        s.closing_cash,
+        u.first_name,
+        u.last_name,
+        u.employee_code,
+        l.location_name,
+        DATE(s.start_time) as shift_date,
+        EXTRACT(HOUR FROM s.end_time - s.start_time) as hours_worked
+       FROM shifts s
+       INNER JOIN users u ON s.user_id = u.user_id
+       LEFT JOIN locations l ON s.location_id = l.location_id
+       WHERE EXTRACT(MONTH FROM s.start_time) = $1
+         AND EXTRACT(YEAR FROM s.start_time) = $2
+       ORDER BY s.start_time DESC`,
+      [targetMonth, targetYear]
+    );
+
+    // Group shifts by date
+    const shiftsByDate = {};
+    result.rows.forEach(shift => {
+      const dateKey = new Date(shift.shift_date).toISOString().split('T')[0];
+      if (!shiftsByDate[dateKey]) {
+        shiftsByDate[dateKey] = [];
+      }
+      shiftsByDate[dateKey].push({
+        id: shift.shift_id,
+        userId: shift.user_id,
+        userName: `${shift.first_name} ${shift.last_name || ''}`.trim(),
+        employeeCode: shift.employee_code,
+        startTime: shift.start_time,
+        endTime: shift.end_time,
+        status: shift.status,
+        location: shift.location_name,
+        hoursWorked: parseFloat(shift.hours_worked) || 0
+      });
+    });
+
+    // Get summary stats
+    const statsResult = await pool.query(
+      `SELECT 
+        COUNT(DISTINCT s.shift_id) as total_shifts,
+        COUNT(DISTINCT s.user_id) as unique_users,
+        SUM(EXTRACT(EPOCH FROM (s.end_time - s.start_time))/3600) as total_hours
+       FROM shifts s
+       WHERE EXTRACT(MONTH FROM s.start_time) = $1
+         AND EXTRACT(YEAR FROM s.start_time) = $2
+         AND s.end_time IS NOT NULL`,
+      [targetMonth, targetYear]
+    );
+
+    res.json({
+      month: targetMonth,
+      year: targetYear,
+      shiftsByDate,
+      stats: {
+        totalShifts: parseInt(statsResult.rows[0]?.total_shifts) || 0,
+        uniqueUsers: parseInt(statsResult.rows[0]?.unique_users) || 0,
+        totalHours: parseFloat(statsResult.rows[0]?.total_hours) || 0
+      }
+    });
+  } catch (error) {
+    console.error('Calendar endpoint error:', error);
     next(error);
   }
 });

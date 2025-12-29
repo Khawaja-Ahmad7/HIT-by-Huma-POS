@@ -10,7 +10,9 @@ import {
   ExclamationTriangleIcon,
   ArrowPathIcon,
   FunnelIcon,
-  ChevronDownIcon
+  ChevronDownIcon,
+  PlayIcon,
+  PauseIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -18,7 +20,7 @@ import toast from 'react-hot-toast';
 export default function Inventory() {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedLocation, setSelectedLocation] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState('1'); // Default to Main Store
   const [stockFilter, setStockFilter] = useState('all'); // all, low, out
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -29,7 +31,7 @@ export default function Inventory() {
     queryKey: ['locations'],
     queryFn: () => api.get('/inventory/locations').then(res => res.data)
   });
-  
+
   // Extract and transform locations
   const locations = locationsData?.locations?.map(loc => ({
     id: loc.LocationID,
@@ -52,9 +54,12 @@ export default function Inventory() {
       if (searchQuery) params.append('search', searchQuery);
       if (stockFilter === 'low') params.append('lowStock', 'true');
       return api.get(`/inventory?${params}`).then(res => res.data);
-    }
+    },
+    staleTime: 0, // Always consider data stale to get fresh stock counts
+    refetchOnWindowFocus: true, // Refetch when tab gains focus
+    refetchOnMount: true // Refetch when component mounts
   });
-  
+
   // Extract inventory array and summary from response
   const inventory = inventoryData?.inventory || [];
   const summary = inventoryData?.summary || {
@@ -65,11 +70,11 @@ export default function Inventory() {
   };
 
   // Filter inventory based on stockFilter
-  const filteredInventory = stockFilter === 'out' 
+  const filteredInventory = stockFilter === 'out'
     ? inventory.filter(item => (item.quantity || 0) <= 0)
     : stockFilter === 'low'
-    ? inventory.filter(item => item.quantity > 0 && item.quantity <= lowStockThreshold)
-    : inventory;
+      ? inventory.filter(item => item.quantity > 0 && item.quantity <= lowStockThreshold)
+      : inventory;
 
   const handleAdjust = (product) => {
     setSelectedProduct(product);
@@ -86,6 +91,24 @@ export default function Inventory() {
     if (quantity <= lowStockThreshold) return 'text-yellow-600 bg-yellow-100';
     return 'text-green-600 bg-green-100';
   };
+
+  // Toggle product active status
+  const handleToggleActive = async (item) => {
+    try {
+      const productId = item.productId || item.product?.id;
+      if (!productId) {
+        toast.error('Product ID not found');
+        return;
+      }
+      const result = await api.patch(`/products/${productId}/toggle-active`);
+      const action = result.data.isActive ? 'activated' : 'deactivated';
+      toast.success(`Product ${action} successfully`);
+      refetch();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to toggle product status');
+    }
+  };
+
 
   return (
     <div className="p-6">
@@ -113,7 +136,7 @@ export default function Inventory() {
         <div className="bg-white rounded-xl p-4 border">
           <p className="text-sm text-gray-500 mb-1">Total Stock Value</p>
           <p className="text-2xl font-bold text-gray-900">
-            ${(summary?.totalValue || 0).toLocaleString()}
+            Rs. {(summary?.totalValue || 0).toLocaleString()}
           </p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-yellow-200 bg-yellow-50">
@@ -168,11 +191,10 @@ export default function Inventory() {
             <button
               key={filter.value}
               onClick={() => setStockFilter(filter.value)}
-              className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-                stockFilter === filter.value
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${stockFilter === filter.value
+                ? 'bg-primary-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
             >
               {filter.label}
             </button>
@@ -227,10 +249,15 @@ export default function Inventory() {
               ))
             ) : filteredInventory?.length > 0 ? (
               filteredInventory.map((item) => (
-                <tr key={`${item.id || item.variantId}-${item.locationId}`} className="hover:bg-gray-50">
+                <tr key={`${item.id || item.variantId}-${item.locationId}`} className={`hover:bg-gray-50 ${item.isActive === false ? 'bg-gray-100 opacity-70' : ''}`}>
                   <td className="px-6 py-4">
                     <div>
-                      <p className="font-medium text-gray-900">{item.productName || item.product?.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-gray-900">{item.productName || item.product?.name}</p>
+                        {item.isActive === false && (
+                          <span className="px-2 py-0.5 text-xs bg-gray-300 text-gray-700 rounded">Inactive</span>
+                        )}
+                      </div>
                       {(item.variantName || item.variant?.name) && (
                         <p className="text-sm text-gray-500">{item.variantName || item.variant?.name}</p>
                       )}
@@ -248,15 +275,29 @@ export default function Inventory() {
                     {(item.quantity || 0) - (item.reserved || 0)}
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                      getStockStatusColor(item.quantity || 0, item.reorderLevel || lowStockThreshold)
-                    }`}>
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStockStatusColor(item.quantity || 0, item.reorderLevel || lowStockThreshold)
+                      }`}>
                       {(item.quantity || 0) <= 0 ? 'Out of Stock' :
-                       (item.quantity || 0) <= (item.reorderLevel || lowStockThreshold) ? 'Low Stock' : 'In Stock'}
+                        (item.quantity || 0) <= (item.reorderLevel || lowStockThreshold) ? 'Low Stock' : 'In Stock'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-2">
+                      {/* Toggle Active/Inactive */}
+                      <button
+                        onClick={() => handleToggleActive(item)}
+                        className={`p-2 rounded-lg transition-colors ${item.isActive === false
+                          ? 'text-green-600 hover:bg-green-100'
+                          : 'text-yellow-600 hover:bg-yellow-100'
+                          }`}
+                        title={item.isActive === false ? 'Activate Product' : 'Deactivate Product'}
+                      >
+                        {item.isActive === false ? (
+                          <PlayIcon className="w-4 h-4" />
+                        ) : (
+                          <PauseIcon className="w-4 h-4" />
+                        )}
+                      </button>
                       <button
                         onClick={() => handleAdjust(item)}
                         className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg"
@@ -340,10 +381,10 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
 
     setLoading(true);
     try {
-      const adjustmentValue = adjustmentType === 'add' 
-        ? parseInt(quantity) 
+      const adjustmentValue = adjustmentType === 'add'
+        ? parseInt(quantity)
         : -parseInt(quantity);
-      
+
       await api.post('/inventory/adjust', {
         variantId: product.variantId || product.variant?.id,
         locationId: product.locationId || product.location?.id || 1,
@@ -390,11 +431,10 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
             <button
               type="button"
               onClick={() => setAdjustmentType('add')}
-              className={`flex-1 py-3 rounded-lg font-medium flex items-center justify-center gap-2 ${
-                adjustmentType === 'add'
-                  ? 'bg-green-500 text-white'
-                  : 'bg-gray-100 text-gray-700'
-              }`}
+              className={`flex-1 py-3 rounded-lg font-medium flex items-center justify-center gap-2 ${adjustmentType === 'add'
+                ? 'bg-green-500 text-white'
+                : 'bg-gray-100 text-gray-700'
+                }`}
             >
               <PlusIcon className="w-5 h-5" />
               Add Stock
@@ -402,11 +442,10 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
             <button
               type="button"
               onClick={() => setAdjustmentType('remove')}
-              className={`flex-1 py-3 rounded-lg font-medium flex items-center justify-center gap-2 ${
-                adjustmentType === 'remove'
-                  ? 'bg-red-500 text-white'
-                  : 'bg-gray-100 text-gray-700'
-              }`}
+              className={`flex-1 py-3 rounded-lg font-medium flex items-center justify-center gap-2 ${adjustmentType === 'remove'
+                ? 'bg-red-500 text-white'
+                : 'bg-gray-100 text-gray-700'
+                }`}
             >
               <MinusIcon className="w-5 h-5" />
               Remove Stock
@@ -451,10 +490,9 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
           <div className="p-4 bg-gray-50 rounded-lg">
             <div className="flex justify-between items-center">
               <span className="text-gray-600">New Stock Level:</span>
-              <span className={`text-2xl font-bold ${
-                newQuantity < 0 ? 'text-red-600' :
+              <span className={`text-2xl font-bold ${newQuantity < 0 ? 'text-red-600' :
                 newQuantity <= 10 ? 'text-yellow-600' : 'text-green-600'
-              }`}>
+                }`}>
                 {newQuantity}
               </span>
             </div>

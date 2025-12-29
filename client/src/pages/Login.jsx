@@ -14,17 +14,17 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!employeeCode || !password) {
       toast.error('Please enter your credentials');
       return;
     }
 
     setLoading(true);
-    
+
     try {
       const result = await login(employeeCode, password);
-      
+
       if (result.success) {
         toast.success('Welcome back!');
         navigate('/pos');
@@ -50,8 +50,8 @@ export default function Login() {
       <div className="relative w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-lg border border-white/20 mb-4">
-            <span className="text-4xl font-display font-bold text-white">H</span>
+          <div className="inline-flex items-center justify-center mb-4">
+            <img src="/logo.png" alt="HIT by Huma" className="w-32 h-32 object-contain" />
           </div>
           <h1 className="text-3xl font-display font-bold text-white mb-2">
             HIT BY HUMA

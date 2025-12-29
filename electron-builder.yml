@@ -1,0 +1,31 @@
+appId: com.hitbyhuma.pos
+productName: HIT by Huma POS
+copyright: Copyright © 2024 HIT BY HUMA
+
+directories:
+  output: dist
+  buildResources: electron
+
+files:
+  - electron/**/*
+  - server/**/*
+  - client/dist/**/*
+  - "!**/node_modules/.cache/**"
+  - "!**/.git/**"
+
+# Unpack server files from asar so Node.js can access them
+asarUnpack:
+  - server/**/*
+  - client/dist/**/*
+
+win:
+  target:
+    - nsis
+  icon: electron/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: HIT by Huma POS

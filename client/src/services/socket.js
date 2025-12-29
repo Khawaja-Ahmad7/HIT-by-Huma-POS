@@ -1,9 +1,9 @@
 import { io } from 'socket.io-client';
 import { useCartStore } from '../stores/cartStore';
 
-// Backend Socket URL - Railway deployment
-const BACKEND_URL = 'https://pos-backend-production-93a5.up.railway.app';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (import.meta.env.DEV ? '/' : BACKEND_URL);
+// Backend Socket URL configuration
+// TEMPORARY: Hardcoded for local development since .env not loading
+const SOCKET_URL = 'http://localhost:5000';
 
 class SocketService {
   constructor() {
@@ -77,7 +77,7 @@ class SocketService {
     try {
       // Import api here to avoid circular dependency
       const { default: api } = await import('./api');
-      
+
       // Search for product by barcode
       const response = await api.get('/products/search/quick', {
         params: { q: barcode },
@@ -85,7 +85,7 @@ class SocketService {
 
       if (response.data.results?.length > 0) {
         const product = response.data.results[0];
-        
+
         // Add to cart
         useCartStore.getState().addItem({
           variantId: product.variantId,

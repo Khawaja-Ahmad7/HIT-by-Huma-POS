@@ -1,13 +1,12 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
-// Backend API URL - Railway deployment
-const BACKEND_URL = 'https://pos-backend-production-93a5.up.railway.app';
-const API_BASE_URL = import.meta.env.VITE_API_URL 
-  ? `${import.meta.env.VITE_API_URL}/api/v1`
-  : import.meta.env.DEV 
-    ? '/api/v1' 
-    : `${BACKEND_URL}/api/v1`;
+// Backend API URL configuration
+// TEMPORARY: Hardcoded for local development since .env not loading
+const BACKEND_URL = 'http://localhost:5000';
+console.log('🔍 DEBUG - BACKEND_URL being used:', BACKEND_URL);
+const API_BASE_URL = `${BACKEND_URL}/api/v1`;
+console.log('🔍 DEBUG - API_BASE_URL:', API_BASE_URL);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -36,11 +35,11 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
+
     // Handle 401 errors (token expired)
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      
+
       try {
         const newToken = await useAuthStore.getState().refreshAccessToken();
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
@@ -52,7 +51,7 @@ api.interceptors.response.use(
         return Promise.reject(refreshError);
       }
     }
-    
+
     return Promise.reject(error);
   }
 );
@@ -65,7 +64,7 @@ export const authService = {
   refresh: (refreshToken) => api.post('/auth/refresh', { refreshToken }),
   me: () => api.get('/auth/me'),
   verifyPin: (pin) => api.post('/auth/verify-pin', { pin }),
-  changePassword: (currentPassword, newPassword) => 
+  changePassword: (currentPassword, newPassword) =>
     api.post('/auth/change-password', { currentPassword, newPassword }),
 };
 
@@ -81,7 +80,7 @@ export const productService = {
 
 export const inventoryService = {
   getAll: (params) => api.get('/inventory', { params }),
-  checkOtherLocations: (variantId, currentLocationId) => 
+  checkOtherLocations: (variantId, currentLocationId) =>
     api.get(`/inventory/check-other-locations/${variantId}`, { params: { currentLocationId } }),
   adjust: (data) => api.post('/inventory/adjust', data),
   receive: (data) => api.post('/inventory/receive', data),

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
@@ -5,28 +6,28 @@ const { Pool } = require('pg');
 async function migrate() {
   console.log('🚀 Starting database migration...');
   console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'set (hidden)' : 'not set');
-  
+
   // For Railway internal networking, no SSL needed
   // For public connections (proxy), SSL is required
   const isInternalNetwork = process.env.DATABASE_URL?.includes('.railway.internal');
   const isLocalhost = process.env.DATABASE_URL?.includes('localhost');
-  
-  const config = process.env.DATABASE_URL 
+
+  const config = process.env.DATABASE_URL
     ? {
-        connectionString: process.env.DATABASE_URL,
-        ssl: (isInternalNetwork || isLocalhost) ? false : { rejectUnauthorized: false },
-      }
+      connectionString: process.env.DATABASE_URL,
+      ssl: (isInternalNetwork || isLocalhost) ? false : { rejectUnauthorized: false },
+    }
     : {
-        host: process.env.DB_HOST || 'localhost',
-        port: parseInt(process.env.DB_PORT) || 5432,
-        database: process.env.DB_NAME || 'hitbyhuma_pos',
-        user: process.env.DB_USER || 'postgres',
-        password: process.env.DB_PASSWORD || '',
-      };
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT) || 5432,
+      database: process.env.DB_NAME || 'hitbyhuma_pos',
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || '',
+    };
 
   console.log('SSL mode:', config.ssl ? 'enabled' : 'disabled');
   console.log('Internal network:', isInternalNetwork);
-  
+
   const pool = new Pool({
     ...config,
     connectionTimeoutMillis: 60000,
@@ -35,14 +36,14 @@ async function migrate() {
 
   try {
     console.log('Connecting to database...');
-    
+
     // Read the schema file
     const schemaPath = path.join(__dirname, 'schema.postgres.sql');
     const schema = fs.readFileSync(schemaPath, 'utf8');
-    
+
     // Execute the schema
     await pool.query(schema);
-    
+
     console.log('✅ Database migration completed successfully!');
   } catch (error) {
     console.error('❌ Migration failed:', error.message);

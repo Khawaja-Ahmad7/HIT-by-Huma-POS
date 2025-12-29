@@ -13,7 +13,8 @@ import {
   BanknotesIcon,
   XMarkIcon,
   QrCodeIcon,
-  PrinterIcon
+  PrinterIcon,
+  BuildingLibraryIcon
 } from '@heroicons/react/24/outline';
 import { useCartStore } from '../stores/cartStore';
 import api from '../services/api';
@@ -25,6 +26,7 @@ export default function POS() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [showSuspendedModal, setShowSuspendedModal] = useState(false);
+  const [showSplitPaymentModal, setShowSplitPaymentModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const searchInputRef = useRef(null);
   const lastScanRef = useRef('');
@@ -159,7 +161,7 @@ export default function POS() {
       // Set timeout to process barcode
       scanTimeoutRef.current = setTimeout(() => {
         const barcode = lastScanRef.current.trim();
-        if (barcode.length >= 6) {
+        if (barcode.length >= 3) {
           handleBarcodeScanned(barcode);
         }
         lastScanRef.current = '';
@@ -180,7 +182,7 @@ export default function POS() {
       const response = await api.get(`/products/barcode/${barcode}`);
       if (response.data) {
         const product = response.data;
-        const stock = parseInt(product.stock) || 0;
+        const stock = parseInt(product.stock) || parseInt(product.totalStock) || 0;
 
         // Check if product is in stock
         if (stock <= 0) {
@@ -188,9 +190,11 @@ export default function POS() {
           return;
         }
 
-        // Check if adding more would exceed stock
-        const existingItem = items.find(item => item.variantId === product.variantId);
+        // Get fresh items from store to avoid stale closure in event listener
+        const currentItems = useCartStore.getState().items;
+        const existingItem = currentItems.find(item => item.variantId === product.variantId);
         const currentQty = existingItem?.quantity || 0;
+
         if (currentQty >= stock) {
           toast.error(`Only ${stock} available in stock`);
           return;
@@ -302,6 +306,31 @@ export default function POS() {
     };
 
     processSaleMutation.mutate(saleData);
+  };
+
+  // Handle split payment with multiple payment methods
+  const handleSplitPayment = (payments) => {
+    const totalAmount = getTotal();
+
+    const saleData = {
+      locationId: 1,
+      customerId: customer?.id || customer?.customer_id || null,
+      items: items.map(item => ({
+        variantId: item.variantId,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        originalPrice: item.originalPrice || item.price,
+        discountAmount: item.discountAmount || 0,
+        taxAmount: 0
+      })),
+      payments: payments,
+      discountAmount: discount || 0,
+      notes: 'Split payment'
+    };
+
+    processSaleMutation.mutate(saleData);
+    setShowSplitPaymentModal(false);
+    setShowPayment(false);
   };
 
   const suspendedCarts = getSuspendedCarts();
@@ -428,7 +457,7 @@ export default function POS() {
                     <p className="text-sm text-gray-500">{sku}</p>
                     <div className="flex items-center justify-between mt-2">
                       <span className="text-lg font-bold text-primary-600">
-                        ${parseFloat(price).toFixed(2)}
+                        Rs. {parseFloat(price).toFixed(2)}
                       </span>
                       <span className={`text-xs px-2 py-1 rounded-full ${stock > 10
                         ? 'bg-green-100 text-green-700'
@@ -543,7 +572,7 @@ export default function POS() {
 
               return (
                 <div
-                  key={item.variantId || `${item.productId}-${item.sku}`}
+                  key={item.variantId || `${item.productId}-Rs. {item.sku}`}
                   className="bg-gray-50 rounded-lg p-3"
                 >
                   <div className="flex items-start gap-3">
@@ -554,7 +583,7 @@ export default function POS() {
                         <p className="text-xs text-gray-500">{variantLabel}</p>
                       )}
                       <p className="text-sm text-primary-600 font-medium">
-                        ${parseFloat(item.price).toFixed(2)}
+                        Rs. {parseFloat(item.price).toFixed(2)}
                       </p>
                     </div>
                     <button
@@ -582,15 +611,15 @@ export default function POS() {
                         }}
                         disabled={item.stock !== undefined && item.stock !== null && item.quantity >= item.stock}
                         className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${item.stock !== undefined && item.stock !== null && item.quantity >= item.stock
-                            ? 'opacity-50 cursor-not-allowed'
-                            : 'hover:bg-gray-100'
+                          ? 'opacity-50 cursor-not-allowed'
+                          : 'hover:bg-gray-100'
                           }`}
                       >
                         <PlusIcon className="w-4 h-4" />
                       </button>
                     </div>
                     <span className="font-semibold text-gray-900">
-                      ${(item.quantity * parseFloat(item.price)).toFixed(2)}
+                      Rs. {(item.quantity * parseFloat(item.price)).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -611,7 +640,7 @@ export default function POS() {
               <span className="text-gray-600">Discount</span>
             </div>
             <span className="font-medium text-gray-900">
-              {discount > 0 ? `-$${discount.toFixed(2)}` : 'Add'}
+              {discount > 0 ? `-Rs. Rs. {discount.toFixed(2)}` : 'Add'}
             </span>
           </button>
 
@@ -619,21 +648,21 @@ export default function POS() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between text-gray-600">
               <span>Subtotal</span>
-              <span>${getSubtotal().toFixed(2)}</span>
+              <span>Rs. {getSubtotal().toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-gray-600">
               <span>Tax (8.25%)</span>
-              <span>${getTax().toFixed(2)}</span>
+              <span>Rs. {getTax().toFixed(2)}</span>
             </div>
             {discount > 0 && (
               <div className="flex justify-between text-green-600">
                 <span>Discount</span>
-                <span>-${discount.toFixed(2)}</span>
+                <span>-Rs. {discount.toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between text-lg font-bold pt-2 border-t">
               <span>Total</span>
-              <span>${getTotal().toFixed(2)}</span>
+              <span>Rs. {getTotal().toFixed(2)}</span>
             </div>
           </div>
 
@@ -661,7 +690,7 @@ export default function POS() {
 
             <div className="text-center mb-6">
               <p className="text-gray-500">Total Amount</p>
-              <p className="text-4xl font-bold text-gray-900">${getTotal().toFixed(2)}</p>
+              <p className="text-4xl font-bold text-gray-900">Rs. {getTotal().toFixed(2)}</p>
             </div>
 
             <div className="space-y-3">
@@ -682,19 +711,27 @@ export default function POS() {
                 <span className="text-lg font-medium">Credit/Debit Card</span>
               </button>
               <button
-                onClick={() => handlePayment(getPaymentMethodId('CASH'), 'SPLIT')}
+                onClick={() => setShowSplitPaymentModal(true)}
                 disabled={processSaleMutation.isPending}
                 className="w-full flex items-center justify-center gap-3 p-4 bg-purple-500 text-white rounded-xl hover:bg-purple-600 transition-colors"
               >
                 <ArrowPathIcon className="w-6 h-6" />
                 <span className="text-lg font-medium">Split Payment</span>
               </button>
+              <button
+                onClick={() => handlePayment(getPaymentMethodId('BANK_TRANSFER'), 'BANK_TRANSFER')}
+                disabled={processSaleMutation.isPending}
+                className="w-full flex items-center justify-center gap-3 p-4 bg-cyan-500 text-white rounded-xl hover:bg-cyan-600 transition-colors"
+              >
+                <BuildingLibraryIcon className="w-6 h-6" />
+                <span className="text-lg font-medium">Bank Transfer</span>
+              </button>
             </div>
 
             {customer?.wallet_balance > 0 && (
               <div className="mt-4 p-3 bg-yellow-50 rounded-lg">
                 <p className="text-sm text-yellow-800">
-                  Customer has <strong>${customer.wallet_balance.toFixed(2)}</strong> store credit available
+                  Customer has <strong>Rs. {customer.wallet_balance.toFixed(2)}</strong> store credit available
                 </p>
                 <button
                   onClick={() => handlePayment(getPaymentMethodId('STORE_CREDIT'), 'STORE_CREDIT')}
@@ -743,6 +780,17 @@ export default function POS() {
           }}
         />
       )}
+
+      {/* Split Payment Modal */}
+      {showSplitPaymentModal && (
+        <SplitPaymentModal
+          total={getTotal()}
+          getPaymentMethodId={getPaymentMethodId}
+          onClose={() => setShowSplitPaymentModal(false)}
+          onConfirm={handleSplitPayment}
+          isProcessing={processSaleMutation.isPending}
+        />
+      )}
     </div>
   );
 }
@@ -752,6 +800,9 @@ function CustomerModal({ onClose, onSelect }) {
   const [search, setSearch] = useState('');
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ firstName: '', lastName: '', phone: '' });
+  const [saving, setSaving] = useState(false);
 
   const searchCustomers = async (query) => {
     if (!query || query.length < 2) {
@@ -761,11 +812,39 @@ function CustomerModal({ onClose, onSelect }) {
     setLoading(true);
     try {
       const response = await api.get(`/customers?search=${query}`);
-      setCustomers(response.data);
+      // API returns { customers: [...] }
+      setCustomers(response.data.customers || response.data || []);
     } catch (error) {
       toast.error('Failed to search customers');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddCustomer = async (e) => {
+    e.preventDefault();
+    if (!newCustomer.firstName || !newCustomer.phone) {
+      toast.error('Name and phone are required');
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await api.post('/customers', newCustomer);
+      const created = response.data;
+      toast.success('Customer created successfully');
+      // Select the newly created customer
+      onSelect({
+        customer_id: created.customer_id,
+        first_name: created.first_name,
+        last_name: created.last_name,
+        phone: created.phone,
+        name: `${created.first_name} ${created.last_name || ''}`.trim(),
+        wallet_balance: 0
+      });
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to create customer');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -778,62 +857,132 @@ function CustomerModal({ onClose, onSelect }) {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-semibold">Select Customer</h3>
+          <h3 className="text-xl font-semibold">
+            {showAddForm ? 'Add New Customer' : 'Select Customer'}
+          </h3>
           <button onClick={onClose}>
             <XMarkIcon className="w-6 h-6 text-gray-400" />
           </button>
         </div>
 
-        <div className="relative mb-4">
-          <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or phone..."
-            className="w-full pl-10 pr-4 py-3 border rounded-lg"
-            autoFocus
-          />
-        </div>
+        {!showAddForm ? (
+          <>
+            <div className="relative mb-4">
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name or phone..."
+                className="w-full pl-10 pr-4 py-3 border rounded-lg"
+                autoFocus
+              />
+            </div>
 
-        <div className="flex-1 overflow-y-auto space-y-2">
-          {loading ? (
-            <div className="text-center py-8 text-gray-500">Searching...</div>
-          ) : customers.length > 0 ? (
-            customers.map((customer) => (
+            <div className="flex-1 overflow-y-auto space-y-2">
+              {loading ? (
+                <div className="text-center py-8 text-gray-500">Searching...</div>
+              ) : customers.length > 0 ? (
+                customers.map((customer) => (
+                  <button
+                    key={customer.customer_id}
+                    onClick={() => onSelect({
+                      ...customer,
+                      name: `${customer.first_name} ${customer.last_name || ''}`.trim()
+                    })}
+                    className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 text-left"
+                  >
+                    <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
+                      <UserIcon className="w-5 h-5 text-primary-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium">{customer.first_name} {customer.last_name}</p>
+                      <p className="text-sm text-gray-500">{customer.phone}</p>
+                    </div>
+                    {customer.wallet_balance > 0 && (
+                      <span className="ml-auto text-sm text-green-600 font-medium">
+                        Rs. {parseFloat(customer.wallet_balance).toFixed(2)} credit
+                      </span>
+                    )}
+                  </button>
+                ))
+              ) : search.length >= 2 ? (
+                <div className="text-center py-8 text-gray-500">No customers found</div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">Enter at least 2 characters to search</div>
+              )}
+            </div>
+
+            <div className="flex gap-2 mt-4">
               <button
-                key={customer.customer_id}
-                onClick={() => onSelect(customer)}
-                className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 text-left"
+                onClick={() => setShowAddForm(true)}
+                className="flex-1 btn-primary flex items-center justify-center gap-2"
               >
-                <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                  <UserIcon className="w-5 h-5 text-primary-600" />
-                </div>
-                <div>
-                  <p className="font-medium">{customer.first_name} {customer.last_name}</p>
-                  <p className="text-sm text-gray-500">{customer.phone}</p>
-                </div>
-                {customer.wallet_balance > 0 && (
-                  <span className="ml-auto text-sm text-green-600 font-medium">
-                    ${customer.wallet_balance.toFixed(2)} credit
-                  </span>
-                )}
+                <PlusIcon className="w-5 h-5" />
+                Add New Customer
               </button>
-            ))
-          ) : search.length >= 2 ? (
-            <div className="text-center py-8 text-gray-500">No customers found</div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">Enter at least 2 characters to search</div>
-          )}
-        </div>
-
-        <button onClick={onClose} className="mt-4 btn btn-secondary w-full">
-          Continue without customer
-        </button>
+              <button onClick={onClose} className="flex-1 btn btn-secondary">
+                Continue without
+              </button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={handleAddCustomer} className="space-y-4">
+            <div>
+              <label className="label">First Name *</label>
+              <input
+                type="text"
+                value={newCustomer.firstName}
+                onChange={(e) => setNewCustomer({ ...newCustomer, firstName: e.target.value })}
+                className="input"
+                placeholder="First name"
+                required
+              />
+            </div>
+            <div>
+              <label className="label">Last Name</label>
+              <input
+                type="text"
+                value={newCustomer.lastName}
+                onChange={(e) => setNewCustomer({ ...newCustomer, lastName: e.target.value })}
+                className="input"
+                placeholder="Last name"
+              />
+            </div>
+            <div>
+              <label className="label">Phone Number *</label>
+              <input
+                type="tel"
+                value={newCustomer.phone}
+                onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                className="input"
+                placeholder="03XX-XXXXXXX"
+                required
+              />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="flex-1 btn btn-secondary"
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex-1 btn-primary"
+              >
+                {saving ? 'Saving...' : 'Create & Select'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
 }
+
 
 // Discount Modal Component
 function DiscountModal({ currentDiscount, subtotal, onClose, onApply }) {
@@ -861,7 +1010,7 @@ function DiscountModal({ currentDiscount, subtotal, onClose, onApply }) {
         <div className="flex gap-2 mb-4">
           <button
             onClick={() => setDiscountType('percent')}
-            className={`flex-1 py-2 rounded-lg font-medium ${discountType === 'percent'
+            className={`flex-1 py-2 rounded-lg font-medium Rs. {discountType === 'percent'
               ? 'bg-primary-600 text-white'
               : 'bg-gray-100 text-gray-700'
               }`}
@@ -870,7 +1019,7 @@ function DiscountModal({ currentDiscount, subtotal, onClose, onApply }) {
           </button>
           <button
             onClick={() => setDiscountType('fixed')}
-            className={`flex-1 py-2 rounded-lg font-medium ${discountType === 'fixed'
+            className={`flex-1 py-2 rounded-lg font-medium Rs. {discountType === 'fixed'
               ? 'bg-primary-600 text-white'
               : 'bg-gray-100 text-gray-700'
               }`}
@@ -897,7 +1046,7 @@ function DiscountModal({ currentDiscount, subtotal, onClose, onApply }) {
         <div className="text-center mb-4 p-3 bg-gray-50 rounded-lg">
           <p className="text-gray-500">Discount Amount</p>
           <p className="text-2xl font-bold text-green-600">
-            -${calculateDiscount().toFixed(2)}
+            -Rs. {calculateDiscount().toFixed(2)}
           </p>
         </div>
 
@@ -951,6 +1100,153 @@ function SuspendedCartsModal({ carts, onClose, onResume }) {
               )}
             </button>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Split Payment Modal
+function SplitPaymentModal({ total, getPaymentMethodId, onClose, onConfirm, isProcessing }) {
+  const [cashAmount, setCashAmount] = useState('');
+  const [cardAmount, setCardAmount] = useState('');
+  const [bankAmount, setBankAmount] = useState('');
+
+  const getCashValue = () => parseFloat(cashAmount) || 0;
+  const getCardValue = () => parseFloat(cardAmount) || 0;
+  const getBankValue = () => parseFloat(bankAmount) || 0;
+  const getSum = () => getCashValue() + getCardValue() + getBankValue();
+  const getRemaining = () => total - getSum();
+  const isValid = () => Math.abs(getRemaining()) < 0.01 && getSum() > 0;
+
+  const handleConfirm = () => {
+    if (!isValid()) {
+      toast.error('Split amounts must equal the total');
+      return;
+    }
+
+    const payments = [];
+
+    if (getCashValue() > 0) {
+      payments.push({
+        paymentMethodId: getPaymentMethodId('CASH'),
+        amount: getCashValue()
+      });
+    }
+
+    if (getCardValue() > 0) {
+      payments.push({
+        paymentMethodId: getPaymentMethodId('CARD'),
+        amount: getCardValue()
+      });
+    }
+
+    if (getBankValue() > 0) {
+      payments.push({
+        paymentMethodId: getPaymentMethodId('BANK_TRANSFER'),
+        amount: getBankValue()
+      });
+    }
+
+    if (payments.length === 0) {
+      toast.error('Please enter at least one payment amount');
+      return;
+    }
+
+    onConfirm(payments);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-semibold">Split Payment</h3>
+          <button onClick={onClose}>
+            <XMarkIcon className="w-6 h-6 text-gray-400" />
+          </button>
+        </div>
+
+        <div className="text-center mb-6">
+          <p className="text-gray-500">Total Amount</p>
+          <p className="text-3xl font-bold text-gray-900">Rs. {total.toFixed(2)}</p>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          {/* Cash */}
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+              <BanknotesIcon className="w-5 h-5 text-green-500" />
+              Cash
+            </label>
+            <input
+              type="number"
+              value={cashAmount}
+              onChange={(e) => setCashAmount(e.target.value)}
+              placeholder="0.00"
+              className="w-full px-4 py-3 border rounded-lg text-lg"
+              min="0"
+              step="0.01"
+            />
+          </div>
+
+          {/* Card */}
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+              <CreditCardIcon className="w-5 h-5 text-blue-500" />
+              Credit/Debit Card
+            </label>
+            <input
+              type="number"
+              value={cardAmount}
+              onChange={(e) => setCardAmount(e.target.value)}
+              placeholder="0.00"
+              className="w-full px-4 py-3 border rounded-lg text-lg"
+              min="0"
+              step="0.01"
+            />
+          </div>
+
+          {/* Bank Transfer */}
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+              <BuildingLibraryIcon className="w-5 h-5 text-cyan-500" />
+              Bank Transfer
+            </label>
+            <input
+              type="number"
+              value={bankAmount}
+              onChange={(e) => setBankAmount(e.target.value)}
+              placeholder="0.00"
+              className="w-full px-4 py-3 border rounded-lg text-lg"
+              min="0"
+              step="0.01"
+            />
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div className="p-4 bg-gray-50 rounded-lg mb-6 space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">Total Entered:</span>
+            <span className="font-medium">Rs. {getSum().toFixed(2)}</span>
+          </div>
+          <div className={`flex justify-between text-sm ${Math.abs(getRemaining()) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
+            <span>Remaining:</span>
+            <span className="font-bold">Rs. {getRemaining().toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 btn btn-secondary">
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={!isValid() || isProcessing}
+            className={`flex-1 btn-primary ${!isValid() ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {isProcessing ? 'Processing...' : 'Complete Sale'}
+          </button>
         </div>
       </div>
     </div>

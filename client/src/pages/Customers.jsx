@@ -13,7 +13,8 @@ import {
   ShoppingBagIcon,
   ClockIcon,
   ChatBubbleLeftIcon,
-  GiftIcon
+  GiftIcon,
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -32,7 +33,7 @@ export default function Customers() {
   const isSalesman = user?.role?.toLowerCase() === 'salesman' || user?.isSalesman;
 
   // Fetch customers
-  const { data: customersData, isLoading } = useQuery({
+  const { data: customersData, isLoading, refetch } = useQuery({
     queryKey: ['customers', searchQuery],
     queryFn: async () => {
       const params = searchQuery ? `?search=${searchQuery}` : '';
@@ -42,21 +43,22 @@ export default function Customers() {
   });
 
   // Extract and normalize customers array from response
+  // API returns snake_case fields directly from database
   const customers = (customersData?.customers || []).map(c => ({
-    customer_id: c.CustomerID,
-    phone: c.Phone,
-    first_name: c.FirstName,
-    last_name: c.LastName,
-    email: c.Email,
-    customer_type: c.CustomerType,
-    total_spent: c.TotalSpend,
-    total_orders: c.TotalVisits,
-    last_visit_at: c.LastVisitAt,
-    wallet_balance: c.WalletBalance,
-    loyalty_points: c.LoyaltyPoints,
+    customer_id: c.customer_id,
+    phone: c.phone,
+    first_name: c.first_name,
+    last_name: c.last_name,
+    email: c.email,
+    customer_type: c.customer_type,
+    total_spent: c.total_purchases,  // database field is total_purchases
+    total_orders: c.visit_count,     // database field is visit_count
+    last_visit_at: c.updated_at,     // use updated_at as last visit indicator
+    wallet_balance: c.wallet_balance,
+    loyalty_points: c.loyalty_points,
     // Calculate days since last purchase
-    last_purchase_days: c.LastVisitAt
-      ? Math.floor((new Date() - new Date(c.LastVisitAt)) / (1000 * 60 * 60 * 24))
+    last_purchase_days: c.updated_at
+      ? Math.floor((new Date() - new Date(c.updated_at)) / (1000 * 60 * 60 * 24))
       : 999
   }));
 
@@ -99,13 +101,22 @@ export default function Customers() {
           <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
           <p className="text-gray-500">Manage customer relationships and purchase history</p>
         </div>
-        <button
-          onClick={() => setShowCustomerModal(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <PlusIcon className="w-5 h-5" />
-          Add Customer
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => refetch()}
+            className="p-2 bg-white border rounded-lg hover:bg-gray-50 transition-colors"
+            title="Refresh"
+          >
+            <ArrowPathIcon className="w-5 h-5 text-gray-600" />
+          </button>
+          <button
+            onClick={() => setShowCustomerModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <PlusIcon className="w-5 h-5" />
+            Add Customer
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -130,32 +141,6 @@ export default function Customers() {
               <p className="text-sm text-gray-500">Active This Month</p>
               <p className="text-xl font-bold text-gray-900">
                 {customers?.filter(c => c.last_purchase_days <= 30).length || 0}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 border">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
-              <WalletIcon className="w-5 h-5 text-yellow-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Total Store Credit</p>
-              <p className="text-xl font-bold text-gray-900">
-                ${customers?.reduce((sum, c) => sum + (c.wallet_balance || 0), 0).toLocaleString() || 0}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 border">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-              <GiftIcon className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Loyalty Points</p>
-              <p className="text-xl font-bold text-gray-900">
-                {customers?.reduce((sum, c) => sum + (c.loyalty_points || 0), 0).toLocaleString() || 0}
               </p>
             </div>
           </div>
@@ -238,18 +223,12 @@ export default function Customers() {
                 <div className="text-center">
                   <p className="text-xs text-gray-500">Total Spent</p>
                   <p className="font-semibold text-gray-900 text-lg">
-                    ${parseFloat(customer.total_spent || 0).toLocaleString()}
+                    Rs. {parseFloat(customer.total_spent || 0).toLocaleString()}
                   </p>
                 </div>
                 <div className="text-center">
                   <p className="text-xs text-gray-500">Orders</p>
                   <p className="font-semibold text-gray-900 text-lg">{customer.total_orders || 0}</p>
-                </div>
-                <div className="text-center col-span-2">
-                  <p className="text-xs text-gray-500">Credit</p>
-                  <p className="font-semibold text-green-600 text-lg">
-                    ${parseFloat(customer.wallet_balance || 0).toFixed(2)}
-                  </p>
                 </div>
               </div>
             </div>
@@ -480,33 +459,33 @@ function CustomerDetailsModal({ customerId, onClose }) {
     queryFn: () => api.get(`/customers/${customerId}`).then(res => res.data)
   });
 
-  // Normalize customer data from server (PascalCase to snake_case)
+  // Customer data is already in snake_case from the API
   const customer = customerData?.customer ? {
-    customer_id: customerData.customer.CustomerID,
-    phone: customerData.customer.Phone,
-    first_name: customerData.customer.FirstName,
-    last_name: customerData.customer.LastName,
-    email: customerData.customer.Email,
-    address: customerData.customer.Address,
-    notes: customerData.customer.Notes,
-    customer_type: customerData.customer.CustomerType,
-    total_spent: customerData.customer.TotalSpend,
-    total_orders: customerData.customer.TotalVisits,
-    wallet_balance: customerData.customer.WalletBalance,
-    loyalty_points: customerData.customer.LoyaltyPoints,
-    sms_opt_in: customerData.customer.SMSOptIn,
-    created_at: customerData.customer.CreatedAt
+    customer_id: customerData.customer.customer_id,
+    phone: customerData.customer.phone,
+    first_name: customerData.customer.first_name,
+    last_name: customerData.customer.last_name,
+    email: customerData.customer.email,
+    address: customerData.customer.address,
+    notes: customerData.customer.notes,
+    customer_type: customerData.customer.customer_type,
+    total_spent: customerData.customer.total_purchases,  // database field is total_purchases
+    total_orders: customerData.customer.visit_count,     // database field is visit_count
+    wallet_balance: customerData.customer.wallet_balance,
+    loyalty_points: customerData.customer.loyalty_points,
+    sms_opt_in: customerData.customer.sms_opt_in,
+    created_at: customerData.customer.created_at
   } : null;
 
-  // Normalize purchases from server
-  const purchases = (customerData?.purchases || []).map(p => ({
-    transaction_id: p.SaleID,
-    transaction_number: p.SaleNumber,
-    total_amount: p.TotalAmount,
-    status: p.Status,
-    created_at: p.CreatedAt,
-    location_name: p.LocationName,
-    item_count: p.ItemCount
+  // Purchases are already in snake_case from the API
+  const purchases = (customerData?.recentPurchases || []).map(p => ({
+    transaction_id: p.sale_id,
+    transaction_number: p.sale_number,
+    total_amount: p.total_amount,
+    status: p.status,
+    created_at: p.created_at,
+    location_name: p.location_name,
+    item_count: p.item_count
   }));
 
   // Add/Remove wallet balance mutation
@@ -555,10 +534,10 @@ function CustomerDetailsModal({ customerId, onClose }) {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-4 gap-4 mt-6">
+          <div className="grid grid-cols-2 gap-4 mt-6">
             <div className="text-center p-3 bg-gray-50 rounded-lg">
               <p className="text-2xl font-bold text-gray-900">
-                ${parseFloat(customer?.total_spent || 0).toLocaleString()}
+                Rs. {parseFloat(customer?.total_spent || 0).toLocaleString()}
               </p>
               <p className="text-xs text-gray-500">Total Spent</p>
             </div>
@@ -566,28 +545,18 @@ function CustomerDetailsModal({ customerId, onClose }) {
               <p className="text-2xl font-bold text-gray-900">{customer?.total_orders || 0}</p>
               <p className="text-xs text-gray-500">Orders</p>
             </div>
-            <div className="text-center p-3 bg-green-50 rounded-lg">
-              <p className="text-2xl font-bold text-green-600">
-                ${parseFloat(customer?.wallet_balance || 0).toFixed(2)}
-              </p>
-              <p className="text-xs text-gray-500">Store Credit</p>
-            </div>
-            <div className="text-center p-3 bg-purple-50 rounded-lg">
-              <p className="text-2xl font-bold text-purple-600">{customer?.loyalty_points || 0}</p>
-              <p className="text-xs text-gray-500">Points</p>
-            </div>
           </div>
         </div>
 
         {/* Tabs */}
         <div className="flex border-b px-6">
-          {['overview', 'purchases', 'wallet'].map((tab) => (
+          {['overview', 'purchases'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-3 font-medium capitalize border-b-2 -mb-px ${activeTab === tab
-                  ? 'border-primary-600 text-primary-600'
-                  : 'border-transparent text-gray-500'
+                ? 'border-primary-600 text-primary-600'
+                : 'border-transparent text-gray-500'
                 }`}
             >
               {tab}
@@ -620,8 +589,8 @@ function CustomerDetailsModal({ customerId, onClose }) {
               <div>
                 <p className="text-sm text-gray-500 mb-1">SMS Notifications</p>
                 <span className={`px-2 py-1 text-xs rounded-full ${customer?.sms_opt_in
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-gray-100 text-gray-600'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-600'
                   }`}>
                   {customer?.sms_opt_in ? 'Opted In' : 'Opted Out'}
                 </span>
@@ -645,7 +614,7 @@ function CustomerDetailsModal({ customerId, onClose }) {
                         {purchase.item_count} items at {purchase.location_name}
                       </span>
                       <span className="font-semibold">
-                        ${parseFloat(purchase.total_amount).toFixed(2)}
+                        Rs. {parseFloat(purchase.total_amount).toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -656,20 +625,6 @@ function CustomerDetailsModal({ customerId, onClose }) {
                   <p>No purchases yet</p>
                 </div>
               )}
-            </div>
-          )}
-
-          {activeTab === 'wallet' && (
-            <div className="space-y-4">
-              <div className="p-6 bg-gradient-to-r from-primary-500 to-purple-600 rounded-xl text-white text-center">
-                <p className="text-sm opacity-80 mb-1">Available Balance</p>
-                <p className="text-4xl font-bold">
-                  ${parseFloat(customer?.wallet_balance || 0).toFixed(2)}
-                </p>
-              </div>
-              <p className="text-sm text-gray-500">
-                Store credit can be applied at checkout. Credits are added from returns or promotional offers.
-              </p>
             </div>
           )}
         </div>

@@ -16,7 +16,8 @@ import {
   TagIcon,
   PencilIcon,
   TrashIcon,
-  PlusIcon
+  PlusIcon,
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -50,11 +51,10 @@ export default function Settings() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-primary-50 text-primary-700 font-medium'
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${activeTab === tab.id
+                  ? 'bg-primary-50 text-primary-700 font-medium'
+                  : 'text-gray-600 hover:bg-gray-50'
+                  }`}
               >
                 <tab.icon className="w-5 h-5" />
                 {tab.label}
@@ -83,10 +83,11 @@ function CategorySettings() {
   const queryClient = useQueryClient();
   const [editingCategory, setEditingCategory] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null); // For delete confirmation
   const [formData, setFormData] = useState({
     category_name: '',
     description: '',
-    sort_order: 0
+    sort_order: 1  // Changed from 0 - sort order is now required
   });
 
   const { data: categories = [], isLoading } = useQuery({
@@ -119,9 +120,18 @@ function CategorySettings() {
     mutationFn: (id) => api.delete(`/products/categories/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries(['categories']);
-      toast.success('Category deleted successfully');
+      toast.success('Category permanently deleted');
     },
     onError: (error) => toast.error(error.response?.data?.message || 'Failed to delete category')
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: (id) => api.patch(`/products/categories/${id}/toggle-active`),
+    onSuccess: (response) => {
+      queryClient.invalidateQueries(['categories']);
+      toast.success(response.data.message);
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to toggle category status')
   });
 
   const handleSubmit = (e) => {
@@ -192,13 +202,15 @@ function CategorySettings() {
                 />
               </div>
               <div>
-                <label className="label">Sort Order</label>
+                <label className="label">Sort Order *</label>
                 <input
                   type="number"
                   value={formData.sort_order}
-                  onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 1 })}
                   className="input"
-                  placeholder="0"
+                  placeholder="1"
+                  min="1"
+                  required
                 />
               </div>
               <div className="md:col-span-2">
@@ -231,7 +243,7 @@ function CategorySettings() {
                 disabled={createMutation.isPending || updateMutation.isPending}
                 className="btn btn-primary"
               >
-                {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' : 
+                {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' :
                   editingCategory ? 'Update Category' : 'Create Category'}
               </button>
               <button
@@ -253,9 +265,8 @@ function CategorySettings() {
             categories.map((category) => (
               <div
                 key={category.category_id}
-                className={`flex items-center justify-between p-4 rounded-lg border ${
-                  category.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'
-                }`}
+                className={`flex items-center justify-between p-4 rounded-lg border ${category.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'
+                  }`}
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
@@ -278,16 +289,46 @@ function CategorySettings() {
                     <PencilIcon className="w-5 h-5" />
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm('Are you sure you want to delete this category?')) {
-                        deleteMutation.mutate(category.category_id);
-                      }
-                    }}
-                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    title="Delete"
+                    onClick={() => toggleActiveMutation.mutate(category.category_id)}
+                    disabled={toggleActiveMutation.isPending}
+                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${category.is_active
+                      ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                      : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      }`}
+                    title={category.is_active ? 'Deactivate' : 'Activate'}
                   >
-                    <TrashIcon className="w-5 h-5" />
+                    {category.is_active ? 'Deactivate' : 'Activate'}
                   </button>
+                  {deleteConfirmId === category.category_id ? (
+                    // Show confirm/cancel buttons
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          deleteMutation.mutate(category.category_id);
+                          setDeleteConfirmId(null);
+                        }}
+                        disabled={deleteMutation.isPending}
+                        className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setDeleteConfirmId(category.category_id)}
+                      disabled={deleteMutation.isPending}
+                      className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                      title="Permanently Delete"
+                    >
+                      <TrashIcon className="w-5 h-5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -301,7 +342,26 @@ function CategorySettings() {
 // Store Settings Component
 function StoreSettings() {
   const queryClient = useQueryClient();
-  
+  const [showAddStore, setShowAddStore] = useState(false);
+  const [editingStore, setEditingStore] = useState(null);
+  const [storeFormData, setStoreFormData] = useState({
+    location_code: '',
+    location_name: '',
+    address: '',
+    city: '',
+    phone: '',
+    email: ''
+  });
+
+  // Fetch all stores/locations
+  const { data: storesData, isLoading: storesLoading } = useQuery({
+    queryKey: ['locations'],
+    queryFn: () => api.get('/settings/locations/all').then(res => res.data)
+  });
+
+  const stores = storesData?.locations || storesData || [];
+
+  // Fetch general store settings
   const { data: settings, isLoading } = useQuery({
     queryKey: ['settings', 'store'],
     queryFn: () => api.get('/settings/store').then(res => res.data)
@@ -325,77 +385,308 @@ function StoreSettings() {
     onError: () => toast.error('Failed to save settings')
   });
 
+  // Create store mutation
+  const createStoreMutation = useMutation({
+    mutationFn: (data) => api.post('/settings/locations', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['locations']);
+      toast.success('Store created successfully');
+      setShowAddStore(false);
+      resetStoreForm();
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to create store')
+  });
+
+  // Update store mutation
+  const updateStoreMutation = useMutation({
+    mutationFn: ({ id, data }) => api.put(`/settings/locations/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['locations']);
+      toast.success('Store updated successfully');
+      setShowAddStore(false);
+      resetStoreForm();
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to update store')
+  });
+
+  const resetStoreForm = () => {
+    setStoreFormData({
+      location_code: '',
+      location_name: '',
+      address: '',
+      city: '',
+      phone: '',
+      email: ''
+    });
+    setEditingStore(null);
+  };
+
+  const startEditStore = (store) => {
+    setEditingStore(store);
+    setStoreFormData({
+      location_code: store.location_code,
+      location_name: store.location_name,
+      address: store.address || '',
+      city: store.city || '',
+      phone: store.phone || '',
+      email: store.email || ''
+    });
+    setShowAddStore(true);
+  };
+
+  const handleStoreSubmit = (e) => {
+    e.preventDefault();
+    if (!storeFormData.location_code || !storeFormData.location_name) {
+      toast.error('Store code and name are required');
+      return;
+    }
+    // Convert to camelCase for backend API
+    const payload = {
+      locationCode: storeFormData.location_code,
+      locationName: storeFormData.location_name,
+      address: storeFormData.address,
+      city: storeFormData.city,
+      phone: storeFormData.phone,
+      email: storeFormData.email
+    };
+
+    if (editingStore) {
+      updateStoreMutation.mutate({ id: editingStore.location_id, data: payload });
+    } else {
+      createStoreMutation.mutate(payload);
+    }
+  };
+
   const currentData = formData || settings || {};
 
   return (
-    <div className="bg-white rounded-xl p-6 border">
-      <h2 className="text-lg font-semibold mb-6">Store Information</h2>
-      
-      <div className="space-y-4 max-w-xl">
-        <div>
-          <label className="label">Store Name</label>
-          <input
-            type="text"
-            value={currentData.store_name || ''}
-            onChange={(e) => setFormData({ ...currentData, store_name: e.target.value })}
-            placeholder="HIT BY HUMA"
-            className="input"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-6">
+      {/* Stores/Locations List */}
+      <div className="bg-white rounded-xl p-6 border">
+        <div className="flex justify-between items-center mb-6">
           <div>
-            <label className="label">Phone</label>
-            <input
-              type="tel"
-              value={currentData.phone || ''}
-              onChange={(e) => setFormData({ ...currentData, phone: e.target.value })}
-              placeholder="(555) 123-4567"
-              className="input"
-            />
+            <h2 className="text-lg font-semibold">Store Locations</h2>
+            <p className="text-sm text-gray-500">Manage your store locations</p>
           </div>
-          <div>
-            <label className="label">Email</label>
-            <input
-              type="email"
-              value={currentData.email || ''}
-              onChange={(e) => setFormData({ ...currentData, email: e.target.value })}
-              placeholder="store@example.com"
-              className="input"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="label">Address</label>
-          <textarea
-            value={currentData.address || ''}
-            onChange={(e) => setFormData({ ...currentData, address: e.target.value })}
-            placeholder="123 Main Street, City, State 12345"
-            rows={2}
-            className="input resize-none"
-          />
-        </div>
-
-        <div>
-          <label className="label">Receipt Footer Message</label>
-          <textarea
-            value={currentData.receipt_footer || ''}
-            onChange={(e) => setFormData({ ...currentData, receipt_footer: e.target.value })}
-            placeholder="Thank you for shopping with us!"
-            rows={2}
-            className="input resize-none"
-          />
-        </div>
-
-        <div className="pt-4">
           <button
-            onClick={() => saveMutation.mutate(formData)}
-            disabled={saveMutation.isPending}
-            className="btn-primary"
+            onClick={() => setShowAddStore(true)}
+            className="btn btn-primary flex items-center gap-2"
           >
-            {saveMutation.isPending ? 'Saving...' : 'Save Changes'}
+            <PlusIcon className="w-5 h-5" />
+            Add Store
           </button>
+        </div>
+
+        {/* Add Store Form */}
+        {showAddStore && (
+          <form onSubmit={handleStoreSubmit} className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-4">{editingStore ? 'Edit Store' : 'Add New Store'}</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Store Code *</label>
+                <input
+                  type="text"
+                  value={storeFormData.location_code}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, location_code: e.target.value.toUpperCase() })}
+                  className="input"
+                  placeholder="e.g., STORE001"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Store Name *</label>
+                <input
+                  type="text"
+                  value={storeFormData.location_name}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, location_name: e.target.value })}
+                  className="input"
+                  placeholder="e.g., Main Store"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">City</label>
+                <input
+                  type="text"
+                  value={storeFormData.city}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, city: e.target.value })}
+                  className="input"
+                  placeholder="e.g., Lahore"
+                />
+              </div>
+              <div>
+                <label className="label">Phone</label>
+                <input
+                  type="tel"
+                  value={storeFormData.phone}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, phone: e.target.value })}
+                  className="input"
+                  placeholder="e.g., +92-300-1234567"
+                />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input
+                  type="email"
+                  value={storeFormData.email}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, email: e.target.value })}
+                  className="input"
+                  placeholder="e.g., store@example.com"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="label">Address</label>
+                <textarea
+                  value={storeFormData.address}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, address: e.target.value })}
+                  className="input resize-none"
+                  rows={2}
+                  placeholder="Full store address"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="submit"
+                disabled={createStoreMutation.isPending || updateStoreMutation.isPending}
+                className="btn btn-primary"
+              >
+                {(createStoreMutation.isPending || updateStoreMutation.isPending) ? 'Saving...' : (editingStore ? 'Update Store' : 'Create Store')}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowAddStore(false); resetStoreForm(); }}
+                className="btn bg-gray-100 text-gray-700 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Stores List */}
+        <div className="space-y-3">
+          {storesLoading ? (
+            <div className="animate-pulse space-y-3">
+              {[1, 2].map(i => (
+                <div key={i} className="h-20 bg-gray-100 rounded-lg" />
+              ))}
+            </div>
+          ) : stores.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <BuildingStorefrontIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p>No stores found. Add your first store above.</p>
+            </div>
+          ) : (
+            stores.map((store) => (
+              <div
+                key={store.location_id}
+                className={`flex items-center justify-between p-4 rounded-lg border ${store.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'}`}
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <BuildingStorefrontIcon className="w-6 h-6 text-primary-600" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium text-gray-900">{store.location_name}</h3>
+                      {store.is_headquarters && (
+                        <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">HQ</span>
+                      )}
+                      {!store.is_active && (
+                        <span className="px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded">Inactive</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-500">{store.location_code}</p>
+                    {store.address && <p className="text-xs text-gray-400">{store.address}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {store.phone && <span className="text-sm text-gray-500">{store.phone}</span>}
+                  <button
+                    onClick={() => startEditStore(store)}
+                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                    title="Edit store"
+                  >
+                    <PencilIcon className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* General Store Info */}
+      <div className="bg-white rounded-xl p-6 border">
+        <h2 className="text-lg font-semibold mb-6">Main Store Information</h2>
+
+        <div className="space-y-4 max-w-xl">
+          <div>
+            <label className="label">Store Name</label>
+            <input
+              type="text"
+              value={currentData.store_name || ''}
+              onChange={(e) => setFormData({ ...currentData, store_name: e.target.value })}
+              placeholder="HIT BY HUMA"
+              className="input"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Phone</label>
+              <input
+                type="tel"
+                value={currentData.phone || ''}
+                onChange={(e) => setFormData({ ...currentData, phone: e.target.value })}
+                placeholder="(555) 123-4567"
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">Email</label>
+              <input
+                type="email"
+                value={currentData.email || ''}
+                onChange={(e) => setFormData({ ...currentData, email: e.target.value })}
+                placeholder="store@example.com"
+                className="input"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Address</label>
+            <textarea
+              value={currentData.address || ''}
+              onChange={(e) => setFormData({ ...currentData, address: e.target.value })}
+              placeholder="123 Main Street, City, State 12345"
+              rows={2}
+              className="input resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="label">Receipt Footer Message</label>
+            <textarea
+              value={currentData.receipt_footer || ''}
+              onChange={(e) => setFormData({ ...currentData, receipt_footer: e.target.value })}
+              placeholder="Thank you for shopping with us!"
+              rows={2}
+              className="input resize-none"
+            />
+          </div>
+
+          <div className="pt-4">
+            <button
+              onClick={() => saveMutation.mutate(formData)}
+              disabled={saveMutation.isPending}
+              className="btn-primary"
+            >
+              {saveMutation.isPending ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -481,7 +772,7 @@ function HardwareSettings() {
     <div className="space-y-6">
       <div className="bg-white rounded-xl p-6 border">
         <h2 className="text-lg font-semibold mb-6">Connected Devices</h2>
-        
+
         <div className="space-y-4">
           {hardwareList.map((device) => (
             <div
@@ -489,12 +780,10 @@ function HardwareSettings() {
               className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
             >
               <div className="flex items-center gap-4">
-                <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                  device.status ? 'bg-green-100' : 'bg-gray-200'
-                }`}>
-                  <device.icon className={`w-6 h-6 ${
-                    device.status ? 'text-green-600' : 'text-gray-400'
-                  }`} />
+                <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${device.status ? 'bg-green-100' : 'bg-gray-200'
+                  }`}>
+                  <device.icon className={`w-6 h-6 ${device.status ? 'text-green-600' : 'text-gray-400'
+                    }`} />
                 </div>
                 <div>
                   <p className="font-medium text-gray-900">{device.name}</p>
@@ -503,11 +792,10 @@ function HardwareSettings() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                  device.status
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-gray-100 text-gray-600'
-                }`}>
+                <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${device.status
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-600'
+                  }`}>
                   {device.status ? (
                     <>
                       <WifiIcon className="w-3 h-3" />
@@ -607,7 +895,7 @@ function HardwareSettings() {
 // Tax Settings Component
 function TaxSettings() {
   const queryClient = useQueryClient();
-  
+
   const { data: settings } = useQuery({
     queryKey: ['settings', 'tax'],
     queryFn: () => api.get('/settings/tax').then(res => res.data)
@@ -628,7 +916,7 @@ function TaxSettings() {
     <div className="space-y-6">
       <div className="bg-white rounded-xl p-6 border">
         <h2 className="text-lg font-semibold mb-6">Tax Configuration</h2>
-        
+
         <div className="space-y-4 max-w-md">
           <div>
             <label className="label">Default Tax Rate (%)</label>
@@ -665,7 +953,7 @@ function TaxSettings() {
 
       <div className="bg-white rounded-xl p-6 border">
         <h2 className="text-lg font-semibold mb-6">Payment Methods</h2>
-        
+
         <div className="space-y-3">
           {['Cash', 'Credit Card', 'Debit Card', 'Store Credit', 'Split Payment'].map((method) => (
             <div key={method} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -757,7 +1045,7 @@ function NotificationSettings() {
   return (
     <div className="bg-white rounded-xl p-6 border">
       <h2 className="text-lg font-semibold mb-6">Notification Preferences</h2>
-      
+
       <div className="space-y-4 max-w-xl">
         <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
           <div>
@@ -800,7 +1088,7 @@ function NotificationSettings() {
               onChange={handleThresholdChange}
               className="input max-w-[200px]"
             />
-            <button 
+            <button
               onClick={saveThreshold}
               disabled={saveMutation.isLoading}
               className="btn btn-primary"
@@ -823,7 +1111,7 @@ function UserSettings() {
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api.get('/settings/users').then(res => res.data)
+    queryFn: () => api.get('/settings/users/all').then(res => res.data)
   });
 
   return (
@@ -845,7 +1133,7 @@ function UserSettings() {
         ) : users?.length > 0 ? (
           users.map((user) => (
             <div
-              key={user.employee_id}
+              key={user.user_id}
               className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
             >
               <div className="flex items-center gap-3">
@@ -860,16 +1148,15 @@ function UserSettings() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                  user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                  user.role === 'manager' ? 'bg-blue-100 text-blue-700' :
-                  'bg-gray-100 text-gray-700'
-                }`}>
-                  {user.role}
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${user.role_name === 'admin' ? 'bg-purple-100 text-purple-700' :
+                  user.role_name === 'manager' ? 'bg-blue-100 text-blue-700' :
+                    user.role_name === 'staff' ? 'bg-teal-100 text-teal-700' :
+                      'bg-gray-100 text-gray-700'
+                  }`}>
+                  {user.role_name || 'Unknown'}
                 </span>
-                <span className={`px-2 py-1 text-xs rounded-full ${
-                  user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                }`}>
+                <span className={`px-2 py-1 text-xs rounded-full ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                  }`}>
                   {user.is_active ? 'Active' : 'Inactive'}
                 </span>
               </div>
@@ -900,138 +1187,165 @@ function UserSettings() {
       )}
     </div>
   );
-// Add User Form Component
-function AddUserForm({ onSuccess }) {
-  const queryClient = useQueryClient();
-  const [form, setForm] = useState({
-    employee_code: '',
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
-    password: '',
-    role_id: 3, // default to cashier
-    location_id: 1
-  });
-  const [loading, setLoading] = useState(false);
+  // Add User Form Component
+  function AddUserForm({ onSuccess }) {
+    const queryClient = useQueryClient();
+    const [form, setForm] = useState({
+      employee_code: '',
+      first_name: '',
+      last_name: '',
+      email: '',
+      phone: '',
+      password: '',
+      role_id: 3, // default to cashier
+      location_id: 1
+    });
+    const [loading, setLoading] = useState(false);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setForm((f) => ({ ...f, [name]: value }));
-  };
+    // Fetch roles from API
+    const { data: roles } = useQuery({
+      queryKey: ['roles'],
+      queryFn: () => api.get('/settings/roles/all').then(res => res.data)
+    });
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await api.post('/settings/users', form);
-      toast.success('User created successfully');
-      queryClient.invalidateQueries(['users']);
-      onSuccess();
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to create user');
-    } finally {
-      setLoading(false);
-    }
-  };
+    const handleChange = (e) => {
+      const { name, value } = e.target;
+      setForm((f) => ({ ...f, [name]: value }));
+    };
 
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label className="label">Employee Code *</label>
-        <input
-          name="employee_code"
-          value={form.employee_code}
-          onChange={handleChange}
-          className="input"
-          required
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-4">
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      try {
+        // Map form fields to API expected format (camelCase)
+        const payload = {
+          employeeCode: form.employee_code,
+          firstName: form.first_name,
+          lastName: form.last_name,
+          email: form.email,
+          phone: form.phone,
+          password: form.password,
+          roleId: parseInt(form.role_id),
+          locationId: parseInt(form.location_id)
+        };
+        await api.post('/settings/users', payload);
+        toast.success('User created successfully');
+        queryClient.invalidateQueries(['users']);
+        onSuccess();
+      } catch (error) {
+        toast.error(error.response?.data?.message || 'Failed to create user');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    return (
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="label">First Name *</label>
+          <label className="label">Employee Code *</label>
           <input
-            name="first_name"
-            value={form.first_name}
+            name="employee_code"
+            value={form.employee_code}
+            onChange={handleChange}
+            className="input"
+            required
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">First Name *</label>
+            <input
+              name="first_name"
+              value={form.first_name}
+              onChange={handleChange}
+              className="input"
+              required
+            />
+          </div>
+          <div>
+            <label className="label">Last Name</label>
+            <input
+              name="last_name"
+              value={form.last_name}
+              onChange={handleChange}
+              className="input"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="label">Email</label>
+          <input
+            name="email"
+            type="email"
+            value={form.email}
+            onChange={handleChange}
+            className="input"
+          />
+        </div>
+        <div>
+          <label className="label">Phone</label>
+          <input
+            name="phone"
+            value={form.phone}
+            onChange={handleChange}
+            className="input"
+          />
+        </div>
+        <div>
+          <label className="label">Password *</label>
+          <input
+            name="password"
+            type="password"
+            value={form.password}
             onChange={handleChange}
             className="input"
             required
           />
         </div>
         <div>
-          <label className="label">Last Name</label>
+          <label className="label">Role</label>
+          <select
+            name="role_id"
+            value={form.role_id}
+            onChange={handleChange}
+            className="input"
+          >
+            {roles && roles.length > 0 ? (
+              roles.map((role) => (
+                <option key={role.role_id} value={role.role_id}>
+                  {role.role_name.charAt(0).toUpperCase() + role.role_name.slice(1)}
+                </option>
+              ))
+            ) : (
+              <>
+                <option value={1}>Admin</option>
+                <option value={2}>Manager</option>
+                <option value={3}>Cashier</option>
+              </>
+            )}
+          </select>
+        </div>
+        <div>
+          <label className="label">Location</label>
           <input
-            name="last_name"
-            value={form.last_name}
+            name="location_id"
+            type="number"
+            value={form.location_id}
             onChange={handleChange}
             className="input"
           />
         </div>
-      </div>
-      <div>
-        <label className="label">Email</label>
-        <input
-          name="email"
-          type="email"
-          value={form.email}
-          onChange={handleChange}
-          className="input"
-        />
-      </div>
-      <div>
-        <label className="label">Phone</label>
-        <input
-          name="phone"
-          value={form.phone}
-          onChange={handleChange}
-          className="input"
-        />
-      </div>
-      <div>
-        <label className="label">Password *</label>
-        <input
-          name="password"
-          type="password"
-          value={form.password}
-          onChange={handleChange}
-          className="input"
-          required
-        />
-      </div>
-      <div>
-        <label className="label">Role</label>
-        <select
-          name="role_id"
-          value={form.role_id}
-          onChange={handleChange}
-          className="input"
-        >
-          <option value={1}>Admin</option>
-          <option value={2}>Manager</option>
-          <option value={3}>Cashier</option>
-        </select>
-      </div>
-      <div>
-        <label className="label">Location</label>
-        <input
-          name="location_id"
-          type="number"
-          value={form.location_id}
-          onChange={handleChange}
-          className="input"
-        />
-      </div>
-      <div className="flex justify-end gap-2">
-        <button type="button" className="btn" onClick={onSuccess} disabled={loading}>
-          Cancel
-        </button>
-        <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Saving...' : 'Create User'}
-        </button>
-      </div>
-    </form>
-  );
-}
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn" onClick={onSuccess} disabled={loading}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Saving...' : 'Create User'}
+          </button>
+        </div>
+      </form>
+    );
+  }
 }
 
 // Security Settings Component
@@ -1040,7 +1354,7 @@ function SecuritySettings() {
     <div className="space-y-6">
       <div className="bg-white rounded-xl p-6 border">
         <h2 className="text-lg font-semibold mb-6">Security Settings</h2>
-        
+
         <div className="space-y-4 max-w-xl">
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
             <div>
@@ -1102,7 +1416,7 @@ function SecuritySettings() {
 // Toggle Component
 function Toggle({ defaultChecked = false, checked: controlledChecked, onChange }) {
   const [internalChecked, setInternalChecked] = useState(defaultChecked);
-  
+
   // Use controlled value if provided, otherwise use internal state
   const isControlled = controlledChecked !== undefined;
   const checked = isControlled ? controlledChecked : internalChecked;
@@ -1117,14 +1431,12 @@ function Toggle({ defaultChecked = false, checked: controlledChecked, onChange }
   return (
     <button
       onClick={handleToggle}
-      className={`relative w-12 h-6 rounded-full transition-colors ${
-        checked ? 'bg-primary-600' : 'bg-gray-300'
-      }`}
+      className={`relative w-12 h-6 rounded-full transition-colors ${checked ? 'bg-primary-600' : 'bg-gray-300'
+        }`}
     >
       <span
-        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-          checked ? 'left-7' : 'left-1'
-        }`}
+        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${checked ? 'left-7' : 'left-1'
+          }`}
       />
     </button>
   );

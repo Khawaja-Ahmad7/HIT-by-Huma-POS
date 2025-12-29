@@ -11,7 +11,10 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
   XMarkIcon,
-  CalendarIcon
+  CalendarIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  UserGroupIcon
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '../stores/authStore';
 import api from '../services/api';
@@ -24,6 +27,10 @@ export default function Shifts() {
   const [showEndModal, setShowEndModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedShift, setSelectedShift] = useState(null);
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
+  const [calendarDate, setCalendarDate] = useState(new Date());
+
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'manager';
 
   // Fetch current shift
   const { data: currentShift, isLoading: shiftLoading } = useQuery({
@@ -35,6 +42,13 @@ export default function Shifts() {
   const { data: shiftHistory } = useQuery({
     queryKey: ['shift-history'],
     queryFn: () => api.get('/shifts/history?limit=10').then(res => res.data)
+  });
+
+  // Fetch calendar data (for admin/manager)
+  const { data: calendarData } = useQuery({
+    queryKey: ['shift-calendar', calendarDate.getMonth() + 1, calendarDate.getFullYear()],
+    queryFn: () => api.get(`/shifts/calendar/month?month=${calendarDate.getMonth() + 1}&year=${calendarDate.getFullYear()}`).then(res => res.data),
+    enabled: isAdminOrManager && viewMode === 'calendar'
   });
 
   // Start shift mutation
@@ -86,150 +100,188 @@ export default function Shifts() {
           <h1 className="text-2xl font-bold text-gray-900">Shift Management</h1>
           <p className="text-gray-500">Clock in/out and end-of-day reconciliation</p>
         </div>
-      </div>
 
-      {/* Current Shift Status */}
-      <div className="bg-white rounded-xl p-6 border mb-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`w-16 h-16 rounded-full flex items-center justify-center ${
-              currentShift ? 'bg-green-100' : 'bg-gray-100'
-            }`}>
-              <ClockIcon className={`w-8 h-8 ${
-                currentShift ? 'text-green-600' : 'text-gray-400'
-              }`} />
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">
-                {currentShift ? 'Shift Active' : 'No Active Shift'}
-              </h2>
-              {currentShift ? (
-                <>
-                  <p className="text-gray-500">
-                    Started at {new Date(currentShift.start_time).toLocaleTimeString()}
-                  </p>
-                  <p className="text-sm text-gray-400">
-                    Duration: {formatDuration(currentShift.start_time)}
-                  </p>
-                </>
-              ) : (
-                <p className="text-gray-500">Start a shift to begin processing sales</p>
-              )}
-            </div>
-          </div>
-
-          {currentShift ? (
+        {/* View Mode Toggle (Admin/Manager only) */}
+        {isAdminOrManager && (
+          <div className="flex bg-gray-100 rounded-lg p-1">
             <button
-              onClick={() => setShowEndModal(true)}
-              className="btn bg-red-500 text-white hover:bg-red-600 flex items-center gap-2"
+              onClick={() => setViewMode('list')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'list'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+                }`}
             >
-              <StopIcon className="w-5 h-5" />
-              End Shift
+              <ClockIcon className="w-4 h-4 inline mr-1" />
+              List View
             </button>
-          ) : (
             <button
-              onClick={() => setShowStartModal(true)}
-              className="btn-primary flex items-center gap-2"
+              onClick={() => setViewMode('calendar')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'calendar'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+                }`}
             >
-              <PlayIcon className="w-5 h-5" />
-              Start Shift
+              <CalendarIcon className="w-4 h-4 inline mr-1" />
+              Calendar View
             </button>
-          )}
-        </div>
-
-        {/* Current Shift Stats */}
-        {currentShift && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 pt-6 border-t">
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <p className="text-3xl font-bold text-gray-900">
-                ${parseFloat(currentShift.total_sales || 0).toLocaleString()}
-              </p>
-              <p className="text-sm text-gray-500">Total Sales</p>
-            </div>
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <p className="text-3xl font-bold text-gray-900">
-                {currentShift.transaction_count || 0}
-              </p>
-              <p className="text-sm text-gray-500">Transactions</p>
-            </div>
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <p className="text-3xl font-bold text-green-600">
-                ${parseFloat(currentShift.cash_sales || 0).toLocaleString()}
-              </p>
-              <p className="text-sm text-gray-500">Cash</p>
-            </div>
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <p className="text-3xl font-bold text-blue-600">
-                ${parseFloat(currentShift.card_sales || 0).toLocaleString()}
-              </p>
-              <p className="text-sm text-gray-500">Card</p>
-            </div>
           </div>
         )}
       </div>
 
-      {/* Shift History */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <div className="p-4 border-b">
-          <h3 className="text-lg font-semibold flex items-center gap-2">
-            <CalendarIcon className="w-5 h-5 text-gray-500" />
-            Recent Shifts
-          </h3>
-        </div>
-        <div className="divide-y">
-          {shiftHistory?.length > 0 ? (
-            shiftHistory.map((shift) => (
-              <div
-                key={shift.shift_id}
-                onClick={() => handleViewShift(shift)}
-                className="p-4 hover:bg-gray-50 cursor-pointer"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                      <ClockIcon className="w-6 h-6 text-gray-500" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        {new Date(shift.start_time).toLocaleDateString()}
+      {/* Calendar View (Admin/Manager only) */}
+      {isAdminOrManager && viewMode === 'calendar' ? (
+        <ShiftCalendar
+          calendarData={calendarData}
+          calendarDate={calendarDate}
+          setCalendarDate={setCalendarDate}
+          onShiftClick={(shift) => {
+            setSelectedShift(shift);
+            setShowHistoryModal(true);
+          }}
+        />
+      ) : (
+        <>
+          {/* Current Shift Status */}
+          <div className="bg-white rounded-xl p-6 border mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center ${currentShift ? 'bg-green-100' : 'bg-gray-100'
+                  }`}>
+                  <ClockIcon className={`w-8 h-8 ${currentShift ? 'text-green-600' : 'text-gray-400'
+                    }`} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {currentShift ? 'Shift Active' : 'No Active Shift'}
+                  </h2>
+                  {currentShift ? (
+                    <>
+                      <p className="text-gray-500">
+                        Started at {new Date(currentShift.start_time).toLocaleTimeString()}
                       </p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(shift.start_time).toLocaleTimeString()} - 
-                        {shift.end_time ? new Date(shift.end_time).toLocaleTimeString() : 'Active'}
+                      <p className="text-sm text-gray-400">
+                        Duration: {formatDuration(currentShift.start_time)}
                       </p>
-                      <p className="text-xs text-gray-400">
-                        {shift.employee_name} • {shift.location_name}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-gray-900">
-                      ${parseFloat(shift.total_sales || 0).toLocaleString()}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      {shift.transaction_count} transactions
-                    </p>
-                    {shift.variance !== 0 && shift.variance !== undefined && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        Math.abs(shift.variance) <= 1
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
-                      }`}>
-                        {shift.variance > 0 ? '+' : ''}${shift.variance?.toFixed(2)} variance
-                      </span>
-                    )}
-                  </div>
+                    </>
+                  ) : (
+                    <p className="text-gray-500">Start a shift to begin processing sales</p>
+                  )}
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="p-8 text-center text-gray-500">
-              <ClockIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-              <p>No shift history available</p>
+
+              {currentShift ? (
+                <button
+                  onClick={() => setShowEndModal(true)}
+                  className="btn bg-red-500 text-white hover:bg-red-600 flex items-center gap-2"
+                >
+                  <StopIcon className="w-5 h-5" />
+                  End Shift
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowStartModal(true)}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  <PlayIcon className="w-5 h-5" />
+                  Start Shift
+                </button>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+
+            {/* Current Shift Stats */}
+            {currentShift && (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 pt-6 border-t">
+                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                  <p className="text-3xl font-bold text-gray-900">
+                    Rs. {parseFloat(currentShift.total_sales || 0).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-500">Total Sales</p>
+                </div>
+                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                  <p className="text-3xl font-bold text-gray-900">
+                    {currentShift.transaction_count || 0}
+                  </p>
+                  <p className="text-sm text-gray-500">Transactions</p>
+                </div>
+                <div className="text-center p-4 bg-green-50 rounded-lg">
+                  <p className="text-3xl font-bold text-green-600">
+                    Rs. {parseFloat(currentShift.cash_sales || 0).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-500">Cash</p>
+                </div>
+                <div className="text-center p-4 bg-blue-50 rounded-lg">
+                  <p className="text-3xl font-bold text-blue-600">
+                    Rs. {parseFloat(currentShift.card_sales || 0).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-500">Card</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Shift History */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="p-4 border-b">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <CalendarIcon className="w-5 h-5 text-gray-500" />
+                Recent Shifts
+              </h3>
+            </div>
+            <div className="divide-y">
+              {shiftHistory?.length > 0 ? (
+                shiftHistory.map((shift) => (
+                  <div
+                    key={shift.shift_id}
+                    onClick={() => handleViewShift(shift)}
+                    className="p-4 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                          <ClockIcon className="w-6 h-6 text-gray-500" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {new Date(shift.start_time).toLocaleDateString()}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {new Date(shift.start_time).toLocaleTimeString()} -
+                            {shift.end_time ? new Date(shift.end_time).toLocaleTimeString() : 'Active'}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {shift.employee_name} • {shift.location_name}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-gray-900">
+                          Rs. {parseFloat(shift.total_sales || 0).toLocaleString()}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {shift.transaction_count} transactions
+                        </p>
+                        {shift.variance !== 0 && shift.variance !== undefined && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${Math.abs(shift.variance) <= 1
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-red-100 text-red-700'
+                            }`}>
+                            {shift.variance > 0 ? '+' : ''}${shift.variance?.toFixed(2)} variance
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="p-8 text-center text-gray-500">
+                  <ClockIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                  <p>No shift history available</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Start Shift Modal */}
       {showStartModal && (
@@ -260,6 +312,137 @@ export default function Shifts() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Shift Calendar Component
+function ShiftCalendar({ calendarData, calendarDate, setCalendarDate, onShiftClick }) {
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+
+  // Get first day of month and number of days
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Create calendar grid
+  const days = [];
+  for (let i = 0; i < firstDay; i++) {
+    days.push(null); // Empty cells before first day
+  }
+  for (let i = 1; i <= daysInMonth; i++) {
+    days.push(i);
+  }
+
+  const prevMonth = () => {
+    setCalendarDate(new Date(year, month - 1, 1));
+  };
+
+  const nextMonth = () => {
+    setCalendarDate(new Date(year, month + 1, 1));
+  };
+
+  const getShiftsForDay = (day) => {
+    if (!day || !calendarData?.shiftsByDate) return [];
+    const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    return calendarData.shiftsByDate[dateKey] || [];
+  };
+
+  return (
+    <div className="bg-white rounded-xl border overflow-hidden">
+      {/* Calendar Header */}
+      <div className="p-4 border-b flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-lg">
+            <ChevronLeftIcon className="w-5 h-5" />
+          </button>
+          <h2 className="text-xl font-semibold">
+            {monthNames[month]} {year}
+          </h2>
+          <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-lg">
+            <ChevronRightIcon className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Stats */}
+        {calendarData?.stats && (
+          <div className="flex gap-6 text-sm">
+            <div>
+              <span className="text-gray-500">Total Shifts:</span>
+              <span className="ml-2 font-semibold">{calendarData.stats.totalShifts}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">Staff:</span>
+              <span className="ml-2 font-semibold">{calendarData.stats.uniqueUsers}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">Hours:</span>
+              <span className="ml-2 font-semibold">{calendarData.stats.totalHours?.toFixed(1)}h</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Day Headers */}
+      <div className="grid grid-cols-7 border-b">
+        {dayNames.map(day => (
+          <div key={day} className="p-3 text-center text-sm font-medium text-gray-500 bg-gray-50">
+            {day}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="grid grid-cols-7">
+        {days.map((day, index) => {
+          const shifts = getShiftsForDay(day);
+          const isToday = day &&
+            new Date().getDate() === day &&
+            new Date().getMonth() === month &&
+            new Date().getFullYear() === year;
+
+          return (
+            <div
+              key={index}
+              className={`min-h-[100px] border-b border-r p-2 ${!day ? 'bg-gray-50' : ''
+                } ${isToday ? 'bg-blue-50' : ''}`}
+            >
+              {day && (
+                <>
+                  <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : 'text-gray-500'
+                    }`}>
+                    {day}
+                  </div>
+                  <div className="space-y-1">
+                    {shifts.slice(0, 3).map((shift, i) => (
+                      <div
+                        key={i}
+                        onClick={() => onShiftClick(shift)}
+                        className={`text-xs p-1 rounded cursor-pointer truncate ${shift.status === 'open'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        title={`${shift.userName} - ${new Date(shift.startTime).toLocaleTimeString()}`}
+                      >
+                        {shift.userName}
+                      </div>
+                    ))}
+                    {shifts.length > 3 && (
+                      <div className="text-xs text-gray-500">
+                        +{shifts.length - 3} more
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -364,13 +547,13 @@ function EndShiftModal({ shift, onClose, onEnd, loading }) {
             <div className="p-4 bg-gray-50 rounded-lg">
               <p className="text-sm text-gray-500">Opening Cash</p>
               <p className="text-xl font-bold text-gray-900">
-                ${parseFloat(shift.opening_cash || 0).toFixed(2)}
+                Rs. {parseFloat(shift.opening_cash || 0).toFixed(2)}
               </p>
             </div>
             <div className="p-4 bg-gray-50 rounded-lg">
               <p className="text-sm text-gray-500">Total Sales</p>
               <p className="text-xl font-bold text-gray-900">
-                ${parseFloat(shift.total_sales || 0).toFixed(2)}
+                Rs. {parseFloat(shift.total_sales || 0).toFixed(2)}
               </p>
             </div>
           </div>
@@ -383,18 +566,18 @@ function EndShiftModal({ shift, onClose, onEnd, loading }) {
                 <BanknotesIcon className="w-5 h-5 text-green-600" />
                 <span>Cash Sales</span>
               </div>
-              <span className="font-medium">${parseFloat(shift.cash_sales || 0).toFixed(2)}</span>
+              <span className="font-medium">Rs. {parseFloat(shift.cash_sales || 0).toFixed(2)}</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CreditCardIcon className="w-5 h-5 text-blue-600" />
                 <span>Card Sales</span>
               </div>
-              <span className="font-medium">${parseFloat(shift.card_sales || 0).toFixed(2)}</span>
+              <span className="font-medium">Rs. {parseFloat(shift.card_sales || 0).toFixed(2)}</span>
             </div>
             <div className="pt-3 border-t flex items-center justify-between font-bold">
               <span>Expected Cash in Drawer</span>
-              <span className="text-lg">${expectedCash}</span>
+              <span className="text-lg">Rs. {expectedCash}</span>
             </div>
           </div>
 
@@ -419,28 +602,25 @@ function EndShiftModal({ shift, onClose, onEnd, loading }) {
 
           {/* Variance Display */}
           {countedCash && (
-            <div className={`p-4 rounded-lg flex items-center gap-3 ${
-              hasVariance 
-                ? Math.abs(parseFloat(variance)) <= 5 
-                  ? 'bg-yellow-50' 
-                  : 'bg-red-50'
-                : 'bg-green-50'
-            }`}>
+            <div className={`p-4 rounded-lg flex items-center gap-3 ${hasVariance
+              ? Math.abs(parseFloat(variance)) <= 5
+                ? 'bg-yellow-50'
+                : 'bg-red-50'
+              : 'bg-green-50'
+              }`}>
               {hasVariance ? (
-                <ExclamationTriangleIcon className={`w-6 h-6 ${
-                  Math.abs(parseFloat(variance)) <= 5 ? 'text-yellow-600' : 'text-red-600'
-                }`} />
+                <ExclamationTriangleIcon className={`w-6 h-6 ${Math.abs(parseFloat(variance)) <= 5 ? 'text-yellow-600' : 'text-red-600'
+                  }`} />
               ) : (
                 <CheckCircleIcon className="w-6 h-6 text-green-600" />
               )}
               <div>
-                <p className={`font-medium ${
-                  hasVariance 
-                    ? Math.abs(parseFloat(variance)) <= 5 
-                      ? 'text-yellow-800' 
-                      : 'text-red-800'
-                    : 'text-green-800'
-                }`}>
+                <p className={`font-medium ${hasVariance
+                  ? Math.abs(parseFloat(variance)) <= 5
+                    ? 'text-yellow-800'
+                    : 'text-red-800'
+                  : 'text-green-800'
+                  }`}>
                   {hasVariance ? (
                     <>Variance: {parseFloat(variance) > 0 ? '+' : ''}${variance}</>
                   ) : (
@@ -449,8 +629,8 @@ function EndShiftModal({ shift, onClose, onEnd, loading }) {
                 </p>
                 {hasVariance && (
                   <p className="text-sm opacity-80">
-                    {Math.abs(parseFloat(variance)) <= 5 
-                      ? 'Small variance - please add a note' 
+                    {Math.abs(parseFloat(variance)) <= 5
+                      ? 'Small variance - please add a note'
                       : 'Large variance detected - manager approval may be required'}
                   </p>
                 )}
@@ -545,7 +725,7 @@ function ShiftDetailModal({ shift, onClose }) {
             <h4 className="font-medium text-gray-700">Sales Summary</h4>
             <div className="flex justify-between">
               <span>Total Sales</span>
-              <span className="font-bold">${parseFloat(shift.total_sales || 0).toFixed(2)}</span>
+              <span className="font-bold">Rs. {parseFloat(shift.total_sales || 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
               <span>Transactions</span>
@@ -553,11 +733,11 @@ function ShiftDetailModal({ shift, onClose }) {
             </div>
             <div className="flex justify-between">
               <span>Cash Sales</span>
-              <span className="font-medium text-green-600">${parseFloat(shift.cash_sales || 0).toFixed(2)}</span>
+              <span className="font-medium text-green-600">Rs. {parseFloat(shift.cash_sales || 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
               <span>Card Sales</span>
-              <span className="font-medium text-blue-600">${parseFloat(shift.card_sales || 0).toFixed(2)}</span>
+              <span className="font-medium text-blue-600">Rs. {parseFloat(shift.card_sales || 0).toFixed(2)}</span>
             </div>
           </div>
 
@@ -566,7 +746,7 @@ function ShiftDetailModal({ shift, onClose }) {
             <h4 className="font-medium text-gray-700">Cash Reconciliation</h4>
             <div className="flex justify-between">
               <span>Opening Cash</span>
-              <span className="font-medium">${parseFloat(shift.opening_cash || 0).toFixed(2)}</span>
+              <span className="font-medium">Rs. {parseFloat(shift.opening_cash || 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
               <span>Expected Cash</span>
@@ -576,14 +756,13 @@ function ShiftDetailModal({ shift, onClose }) {
             </div>
             <div className="flex justify-between">
               <span>Counted Cash</span>
-              <span className="font-medium">${parseFloat(shift.counted_cash || 0).toFixed(2)}</span>
+              <span className="font-medium">Rs. {parseFloat(shift.counted_cash || 0).toFixed(2)}</span>
             </div>
             {shift.variance !== undefined && (
               <div className="flex justify-between pt-2 border-t">
                 <span>Variance</span>
-                <span className={`font-bold ${
-                  Math.abs(shift.variance) <= 1 ? 'text-green-600' : 'text-red-600'
-                }`}>
+                <span className={`font-bold ${Math.abs(shift.variance) <= 1 ? 'text-green-600' : 'text-red-600'
+                  }`}>
                   {shift.variance > 0 ? '+' : ''}${shift.variance?.toFixed(2)}
                 </span>
               </div>

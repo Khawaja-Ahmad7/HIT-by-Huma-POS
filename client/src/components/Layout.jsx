@@ -22,10 +22,10 @@ import {
 // Navigation items with role restrictions
 const allNavItems = [
   { path: '/dashboard', name: 'Dashboard', icon: HomeIcon, roles: ['admin', 'manager'] },
-  { path: '/pos', name: 'POS Terminal', icon: ShoppingCartIcon, roles: ['admin', 'manager', 'cashier', 'salesman'] },
-  { path: '/products', name: 'Products', icon: CubeIcon, roles: ['admin', 'manager', 'salesman'], viewOnly: ['salesman'] },
-  { path: '/inventory', name: 'Inventory', icon: ArchiveBoxIcon, roles: ['admin', 'manager', 'inventory', 'salesman'], viewOnly: ['salesman'] },
-  { path: '/customers', name: 'Customers', icon: UsersIcon, roles: ['admin', 'manager', 'cashier', 'salesman'] },
+  { path: '/pos', name: 'POS Terminal', icon: ShoppingCartIcon, roles: ['admin', 'manager', 'cashier', 'salesman', 'staff'] },
+  { path: '/products', name: 'Products', icon: CubeIcon, roles: ['admin', 'manager', 'salesman', 'staff'], viewOnly: ['salesman'] },
+  { path: '/inventory', name: 'Inventory', icon: ArchiveBoxIcon, roles: ['admin', 'manager', 'inventory', 'salesman', 'staff'], viewOnly: ['salesman'] },
+  { path: '/customers', name: 'Customers', icon: UsersIcon, roles: ['admin', 'manager', 'cashier', 'salesman', 'staff'] },
   { path: '/reports', name: 'Reports', icon: PresentationChartLineIcon, roles: ['admin', 'manager'] },
   { path: '/shifts', name: 'Shifts', icon: ClockIcon, roles: ['admin', 'manager'] },
   { path: '/settings', name: 'Settings', icon: Cog6ToothIcon, roles: ['admin'] },
@@ -105,8 +105,8 @@ export default function Layout() {
           {/* Logo */}
           <div className="flex items-center justify-between h-16 px-4 bg-gray-800">
             <div className={`flex items-center space-x-3 ${sidebarCollapsed ? 'lg:justify-center lg:space-x-0' : ''}`}>
-              <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-lg">H</span>
+              <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 overflow-hidden">
+                <img src="/logo.png" alt="HIT by Huma" className="w-full h-full object-contain" />
               </div>
               <div className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                 <h1 className="text-white font-display font-bold">HIT BY HUMA</h1>
@@ -219,7 +219,7 @@ export default function Layout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto pt-16 lg:pt-0">
+        <main className="flex-1 overflow-auto pt-16 lg:pt-16">
           <Suspense fallback={<PageLoader />}>
             <Outlet />
           </Suspense>

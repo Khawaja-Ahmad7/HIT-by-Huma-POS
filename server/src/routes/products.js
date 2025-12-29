@@ -106,14 +106,17 @@ router.get('/search/quick', async (req, res, next) => {
     }
 
     const pool = db.getPool();
+    // Only include products from active categories (or no category)
     const result = await pool.query(
       `SELECT pv.variant_id, pv.sku, pv.barcode, pv.variant_name, pv.price,
               p.product_name, p.product_code, p.product_id,
               COALESCE(i.quantity_on_hand, 0) as stock
        FROM product_variants pv
        INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN categories c ON p.category_id = c.category_id
        LEFT JOIN inventory i ON pv.variant_id = i.variant_id AND i.location_id = $1
        WHERE pv.is_active = true AND p.is_active = true
+         AND (c.is_active = true OR p.category_id IS NULL)
          AND (pv.sku ILIKE $2 OR pv.barcode = $3 
               OR p.product_name ILIKE $2 OR pv.variant_name ILIKE $2)
        LIMIT 20`,
@@ -133,16 +136,22 @@ router.get('/barcode/:barcode', async (req, res, next) => {
     const locationId = req.query.locationId || 1;
 
     const pool = db.getPool();
+
+    // First try to find by barcode (exact match), then fallback to SKU
+    // Also check if category is active
     const result = await pool.query(
       `SELECT pv.variant_id as "variantId", pv.sku, pv.barcode, pv.variant_name as "variantName", pv.price,
               p.product_id as "productId", p.product_name as "productName", p.product_code as "productCode",
-              p.image_url as "imageUrl",
+              p.image_url as "imageUrl", p.category_id,
+              c.is_active as "categoryActive", c.category_name as "categoryName",
               COALESCE(i.quantity_on_hand, 0) as stock
        FROM product_variants pv
        INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN categories c ON p.category_id = c.category_id
        LEFT JOIN inventory i ON pv.variant_id = i.variant_id AND i.location_id = $1
        WHERE pv.is_active = true AND p.is_active = true
-         AND (pv.barcode = $2 OR pv.sku = $2)
+         AND (pv.barcode = $2 OR (pv.barcode IS NULL AND pv.sku = $2))
+       ORDER BY CASE WHEN pv.barcode = $2 THEN 0 ELSE 1 END
        LIMIT 1`,
       [parseInt(locationId), barcode]
     );
@@ -152,6 +161,16 @@ router.get('/barcode/:barcode', async (req, res, next) => {
     }
 
     const product = result.rows[0];
+
+    // Check if category is inactive
+    if (product.category_id && product.categoryActive === false) {
+      return res.status(400).json({
+        error: 'Currently not for sale',
+        message: `This product (${product.productName}) is currently not available for sale.`,
+        barcode
+      });
+    }
+
     res.json({
       variantId: product.variantId,
       productId: product.productId,
@@ -168,44 +187,14 @@ router.get('/barcode/:barcode', async (req, res, next) => {
   }
 });
 
-// Get product by ID with variants
-router.get('/:id', async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    const productResult = await db.query(
-      `SELECT p.*, c.category_name
-       FROM products p
-       LEFT JOIN categories c ON p.category_id = c.category_id
-       WHERE p.product_id = @id`,
-      { id: parseInt(id) }
-    );
-
-    if (productResult.recordset.length === 0) {
-      throw new NotFoundError('Product not found');
-    }
-
-    const variantsResult = await db.query(
-      `SELECT * FROM product_variants WHERE product_id = @id ORDER BY variant_name`,
-      { id: parseInt(id) }
-    );
-
-    res.json({
-      ...productResult.recordset[0],
-      variants: variantsResult.recordset
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get categories
+// Get categories (MUST be before /:id route!)
 router.get('/categories/list', async (req, res, next) => {
   try {
-    const result = await db.query(
+    const pool = db.getPool();
+    const result = await pool.query(
       `SELECT * FROM categories WHERE is_active = true ORDER BY sort_order, category_name`
     );
-    res.json(result.recordset);
+    res.json(result.rows);
   } catch (error) {
     next(error);
   }
@@ -214,10 +203,48 @@ router.get('/categories/list', async (req, res, next) => {
 // Get all categories (including inactive) for management
 router.get('/categories', async (req, res, next) => {
   try {
-    const result = await db.query(
+    const pool = db.getPool();
+    const result = await pool.query(
       `SELECT * FROM categories ORDER BY sort_order, category_name`
     );
-    res.json(result.recordset);
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get product by ID with variants (MUST be AFTER specific routes like /categories)
+router.get('/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Validate that id is a number
+    if (isNaN(parseInt(id))) {
+      return res.status(400).json({ error: 'Invalid product ID' });
+    }
+
+    const pool = db.getPool();
+    const productResult = await pool.query(
+      `SELECT p.*, c.category_name
+       FROM products p
+       LEFT JOIN categories c ON p.category_id = c.category_id
+       WHERE p.product_id = $1`,
+      [parseInt(id)]
+    );
+
+    if (productResult.rows.length === 0) {
+      throw new NotFoundError('Product not found');
+    }
+
+    const variantsResult = await pool.query(
+      `SELECT * FROM product_variants WHERE product_id = $1 ORDER BY variant_name`,
+      [parseInt(id)]
+    );
+
+    res.json({
+      ...productResult.rows[0],
+      variants: variantsResult.rows
+    });
   } catch (error) {
     next(error);
   }
@@ -232,15 +259,37 @@ router.post('/categories', authorize('admin', 'manager'), async (req, res, next)
       throw new ValidationError('Category name is required');
     }
 
-    const result = await db.query(
+    const pool = db.getPool();
+
+    // Check if category already exists
+    const existing = await pool.query(
+      `SELECT category_id FROM categories WHERE LOWER(category_name) = LOWER($1)`,
+      [category_name]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Category already exists',
+        message: `A category named "${category_name}" already exists`
+      });
+    }
+
+    const result = await pool.query(
       `INSERT INTO categories (category_name, description, sort_order, is_active)
        VALUES ($1, $2, $3, true)
        RETURNING *`,
       [category_name, description || null, sort_order]
     );
 
-    res.status(201).json(result.recordset[0]);
+    res.status(201).json(result.rows[0]);
   } catch (error) {
+    // Handle unique constraint violation
+    if (error.code === '23505') {
+      return res.status(400).json({
+        error: 'Category already exists',
+        message: `A category with this name already exists`
+      });
+    }
     next(error);
   }
 });
@@ -255,7 +304,8 @@ router.put('/categories/:id', authorize('admin', 'manager'), async (req, res, ne
       throw new ValidationError('Category name is required');
     }
 
-    const result = await db.query(
+    const pool = db.getPool();
+    const result = await pool.query(
       `UPDATE categories 
        SET category_name = $1, description = $2, sort_order = $3, is_active = $4
        WHERE category_id = $5
@@ -263,41 +313,79 @@ router.put('/categories/:id', authorize('admin', 'manager'), async (req, res, ne
       [category_name, description || null, sort_order || 0, is_active !== false, id]
     );
 
-    if (result.recordset.length === 0) {
+    if (result.rows.length === 0) {
       throw new NotFoundError('Category not found');
     }
 
-    res.json(result.recordset[0]);
+    res.json(result.rows[0]);
   } catch (error) {
     next(error);
   }
 });
 
-// Delete category (soft delete)
+// Toggle category active status (deactivate/activate)
+router.patch('/categories/:id/toggle-active', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const pool = db.getPool();
+
+    const result = await pool.query(
+      `UPDATE categories SET is_active = NOT is_active WHERE category_id = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Category not found');
+    }
+
+    const category = result.rows[0];
+    res.json({
+      success: true,
+      message: category.is_active ? 'Category activated' : 'Category deactivated',
+      category
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete category (HARD delete - removes from database)
 router.delete('/categories/:id', authorize('admin', 'manager'), async (req, res, next) => {
   try {
     const { id } = req.params;
+    console.log('DELETE /categories/:id called with id:', id);
+    const pool = db.getPool();
 
-    // Check if category has products
-    const productsCheck = await db.query(
+    // Check if category has ACTIVE products (ignore soft-deleted products)
+    const productsCheck = await pool.query(
       `SELECT COUNT(*) as count FROM products WHERE category_id = $1 AND is_active = true`,
       [id]
     );
 
-    if (parseInt(productsCheck.recordset[0].count) > 0) {
-      throw new ValidationError('Cannot delete category with active products. Please move or delete products first.');
+    if (parseInt(productsCheck.rows[0].count) > 0) {
+      return res.status(400).json({
+        error: 'Cannot delete category',
+        message: 'This category has products assigned. Please move or delete products first.'
+      });
     }
 
-    const result = await db.query(
-      `UPDATE categories SET is_active = false WHERE category_id = $1 RETURNING *`,
+    // Clear category reference from soft-deleted products (to avoid FK constraint)
+    await pool.query(
+      `UPDATE products SET category_id = NULL WHERE category_id = $1 AND is_active = false`,
       [id]
     );
 
-    if (result.recordset.length === 0) {
+    // Hard delete - remove from database
+    const result = await pool.query(
+      `DELETE FROM categories WHERE category_id = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
       throw new NotFoundError('Category not found');
     }
 
-    res.json({ message: 'Category deleted successfully' });
+    res.json({ success: true, message: 'Category permanently deleted' });
   } catch (error) {
     next(error);
   }
@@ -338,48 +426,167 @@ router.post('/', authorize('products'), [
     }
 
     // Support both frontend field names (name/code) and backend field names (productName/productCode)
-    const { productCode, productName, name, code, categoryId, category_id, description, basePrice, costPrice, taxRate, barcode, initialStock, initial_stock } = req.body;
+    const { productCode, productName, name, code, categoryId, category_id, description, basePrice, costPrice, taxRate, barcode, initialStock, initial_stock, locationId } = req.body;
     const finalName = productName || name;
     const finalCode = productCode || code || `PRD-${Date.now()}`;
     const finalCategoryId = categoryId || category_id || null;
     const finalInitialStock = initialStock || initial_stock || 0;
 
+    console.log('Creating product with barcode:', barcode);
+
     if (!finalName) {
       throw new ValidationError('Product name is required');
     }
 
+    // Barcode is now required
+    if (!barcode || barcode.trim() === '') {
+      throw new ValidationError('Barcode is required');
+    }
+
+    const pool = db.getPool();
+
+    // Check if barcode already exists
+    const existingBarcode = await pool.query(
+      `SELECT variant_id FROM product_variants WHERE barcode = $1`,
+      [barcode.trim()]
+    );
+
+    if (existingBarcode.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Barcode already exists',
+        message: `A product with barcode "${barcode}" already exists. Please use a unique barcode.`
+      });
+    }
+
+    // Check if SKU already exists
+    const existingSku = await pool.query(
+      `SELECT variant_id FROM product_variants WHERE sku = $1`,
+      [finalCode]
+    );
+
+    if (existingSku.rows.length > 0) {
+      return res.status(400).json({
+        error: 'SKU already exists',
+        message: `A product with SKU "${finalCode}" already exists. Please use a unique SKU number.`
+      });
+    }
+
     // Create the product
-    const result = await db.query(
+    const result = await pool.query(
       `INSERT INTO products (product_code, product_name, category_id, description, base_price, cost_price, tax_rate, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [finalCode, finalName, finalCategoryId, description || null, basePrice, costPrice || 0, taxRate || 0, req.user.user_id]
     );
 
-    const product = result.recordset[0];
+    const product = result.rows[0];
 
-    // Create a default variant for this product
-    const variantResult = await db.query(
-      `INSERT INTO product_variants (product_id, sku, variant_name, price, cost_price, is_active)
-       VALUES ($1, $2, $3, $4, $5, true)
-       RETURNING *`,
-      [product.product_id, finalCode, 'Default', basePrice, costPrice || 0]
-    );
+    // Check if we have custom variants from the request
+    const { variants, hasVariants, color, size } = req.body;
+    const createdVariants = [];
 
-    const variant = variantResult.recordset[0];
+    if (hasVariants && variants && variants.length > 0) {
+      // Create multiple variants as specified
+      for (const v of variants) {
+        // Check barcode uniqueness for each variant
+        if (v.barcode) {
+          const existingVarBarcode = await pool.query(
+            `SELECT variant_id FROM product_variants WHERE barcode = $1`,
+            [v.barcode.trim()]
+          );
+          if (existingVarBarcode.rows.length > 0) {
+            return res.status(400).json({
+              error: 'Barcode already exists',
+              message: `A variant with barcode "${v.barcode}" already exists. Please use a unique barcode.`
+            });
+          }
+        }
 
-    // If initial stock is provided, create inventory record for the variant
-    if (finalInitialStock && parseInt(finalInitialStock) > 0) {
-      await db.query(
-        `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, updated_at)
-         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-         ON CONFLICT (variant_id, location_id) 
-         DO UPDATE SET quantity_on_hand = inventory.quantity_on_hand + $3, updated_at = CURRENT_TIMESTAMP`,
-        [variant.variant_id, req.user.default_location_id || 1, parseInt(finalInitialStock)]
+        // Check SKU uniqueness for each variant
+        if (v.sku) {
+          const existingVarSku = await pool.query(
+            `SELECT variant_id FROM product_variants WHERE sku = $1`,
+            [v.sku.trim()]
+          );
+          if (existingVarSku.rows.length > 0) {
+            return res.status(400).json({
+              error: 'SKU already exists',
+              message: `A variant with SKU "${v.sku}" already exists. Please use a unique SKU.`
+            });
+          }
+        }
+
+        const variantResult = await pool.query(
+          `INSERT INTO product_variants (product_id, sku, barcode, variant_name, price, cost_price, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, true)
+           RETURNING *`,
+          [product.product_id, v.sku || `${finalCode}-V${createdVariants.length + 1}`, v.barcode?.trim() || null, v.variantName || `Variant ${createdVariants.length + 1}`, v.price || basePrice, costPrice || 0]
+        );
+
+        const createdVariant = variantResult.rows[0];
+        createdVariants.push(createdVariant);
+
+        // If initial stock is provided for this variant, create inventory record
+        const variantStock = v.initialStock || v.initial_stock || 0;
+        if (variantStock && parseInt(variantStock) > 0) {
+          const stockLocationId = locationId || req.user.default_location_id || 1;
+          await pool.query(
+            `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (variant_id, location_id) 
+             DO UPDATE SET quantity_on_hand = inventory.quantity_on_hand + $3, updated_at = CURRENT_TIMESTAMP`,
+            [createdVariant.variant_id, stockLocationId, parseInt(variantStock)]
+          );
+        }
+      }
+
+      console.log(`Created ${createdVariants.length} variants for product ${product.product_id}`);
+    } else {
+      // Create a default variant for this product with SEPARATE SKU and barcode
+      // Store color and size in variant_name as 'Color / Size' format
+      let variantName = 'Default';
+      if (color && size) {
+        variantName = `${color} / ${size}`;
+      } else if (color) {
+        variantName = color;
+      } else if (size) {
+        variantName = `/ ${size}`; // Just size, will be parsed correctly
+      }
+
+      const variantResult = await pool.query(
+        `INSERT INTO product_variants (product_id, sku, barcode, variant_name, price, cost_price, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, true)
+         RETURNING *`,
+        [product.product_id, finalCode, barcode.trim(), variantName, basePrice, costPrice || 0]
       );
+
+      const variant = variantResult.rows[0];
+      createdVariants.push(variant);
+      console.log('Created variant with barcode:', variant.barcode, 'color:', color, 'size:', size);
+
+      // If initial stock is provided, create inventory record for the variant at the specified location
+      if (finalInitialStock && parseInt(finalInitialStock) > 0) {
+        // Use locationId from request if provided, otherwise fallback to user's default location or 1
+        const stockLocationId = locationId || req.user.default_location_id || 1;
+        await pool.query(
+          `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, updated_at)
+           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+           ON CONFLICT (variant_id, location_id) 
+           DO UPDATE SET quantity_on_hand = inventory.quantity_on_hand + $3, updated_at = CURRENT_TIMESTAMP`,
+          [variant.variant_id, stockLocationId, parseInt(finalInitialStock)]
+        );
+      }
     }
 
-    res.status(201).json({ ...product, variant });
+    res.status(201).json({
+      ...product,
+      variants: createdVariants,
+      variant: createdVariants[0], // For backwards compatibility
+      productId: product.product_id,
+      barcode: createdVariants[0]?.barcode,
+      color: color || null, // Return color for label printing
+      size: size || null // Return size for label printing
+    });
   } catch (error) {
     next(error);
   }
@@ -389,7 +596,7 @@ router.post('/', authorize('products'), [
 router.put('/:id', authorize('products'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { productName, name, code, productCode, categoryId, category_id, description, basePrice, costPrice, taxRate, isActive, barcode, initialStock, initial_stock, stock } = req.body;
+    const { productName, name, code, productCode, categoryId, category_id, description, basePrice, costPrice, taxRate, isActive, barcode, initialStock, initial_stock, stock, color, size } = req.body;
 
     const finalName = productName || name;
     const finalCategoryId = categoryId || category_id;
@@ -397,7 +604,7 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
     const finalStock = stock ?? initialStock ?? initial_stock;
 
     console.log('PUT /products/:id - Request body:', JSON.stringify(req.body));
-    console.log('PUT /products/:id - Parsed values:', { id, finalName, finalCode, basePrice, costPrice, isActive, finalStock, stockFromBody: stock });
+    console.log('PUT /products/:id - Parsed values:', { id, finalName, finalCode, basePrice, costPrice, isActive, finalStock, color, size });
 
     const result = await db.query(
       `UPDATE products 
@@ -420,6 +627,28 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
     }
 
     const p = result.recordset[0];
+
+    // Update variant_name with color/size if provided
+    if (color !== undefined || size !== undefined) {
+      const pool = db.getPool();
+
+      // Build variant_name from color and size
+      let variantName = 'Default';
+      if (color && size) {
+        variantName = `${color} / ${size}`;
+      } else if (color) {
+        variantName = color;
+      } else if (size) {
+        variantName = `/ ${size}`;
+      }
+
+      // Update the default variant's name
+      await pool.query(
+        `UPDATE product_variants SET variant_name = $1 WHERE product_id = $2`,
+        [variantName, parseInt(id)]
+      );
+      console.log('Updated variant_name to:', variantName);
+    }
 
     // Update stock if provided
     if (finalStock !== null && finalStock !== undefined) {
@@ -512,29 +741,103 @@ router.put('/:id', authorize('products'), async (req, res, next) => {
   }
 });
 
-// Delete product (soft delete)
-router.delete('/:id', authorize('products'), async (req, res, next) => {
+// Toggle product active status (activate/deactivate)
+router.patch('/:id/toggle-active', authorize('products'), async (req, res, next) => {
   try {
     const { id } = req.params;
+    const pool = db.getPool();
 
-    // Soft delete - set is_active to false
-    const result = await db.query(
-      `UPDATE products SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE product_id = $1 RETURNING *`,
+    // Toggle the is_active status
+    const result = await pool.query(
+      `UPDATE products 
+       SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP 
+       WHERE product_id = $1 
+       RETURNING product_id, product_name, is_active`,
       [parseInt(id)]
     );
 
-    if (result.recordset.length === 0) {
+    if (result.rows.length === 0) {
       throw new NotFoundError('Product not found');
     }
 
-    // Also deactivate variants
-    await db.query(
-      `UPDATE product_variants SET is_active = false WHERE product_id = $1`,
+    const product = result.rows[0];
+
+    // Also toggle variants
+    await pool.query(
+      `UPDATE product_variants SET is_active = $1 WHERE product_id = $2`,
+      [product.is_active, parseInt(id)]
+    );
+
+    const action = product.is_active ? 'activated' : 'deactivated';
+    res.json({
+      success: true,
+      message: `Product ${action} successfully`,
+      isActive: product.is_active
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete product (HARD delete - permanently removes from database)
+router.delete('/:id', authorize('products'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const pool = db.getPool();
+
+    // First get all variant IDs for this product
+    const variantsResult = await pool.query(
+      `SELECT variant_id FROM product_variants WHERE product_id = $1`,
+      [parseInt(id)]
+    );
+    const variantIds = variantsResult.rows.map(v => v.variant_id);
+
+    if (variantIds.length > 0) {
+      // Check if this product has any sales history
+      const salesCheck = await pool.query(
+        `SELECT COUNT(*) as count FROM sale_items WHERE variant_id = ANY($1)`,
+        [variantIds]
+      );
+
+      if (parseInt(salesCheck.rows[0].count) > 0) {
+        return res.status(400).json({
+          error: 'Cannot delete product with sales history',
+          message: 'This product has been sold before. To remove it from POS, use the Deactivate button instead. This preserves your transaction history.'
+        });
+      }
+
+      // Delete inventory records that reference these variants
+      await pool.query(
+        `DELETE FROM inventory WHERE variant_id = ANY($1)`,
+        [variantIds]
+      );
+
+      // Delete inventory transactions that reference these variants
+      await pool.query(
+        `DELETE FROM inventory_transactions WHERE variant_id = ANY($1)`,
+        [variantIds]
+      );
+    }
+
+    // Then delete variants
+    await pool.query(
+      `DELETE FROM product_variants WHERE product_id = $1`,
       [parseInt(id)]
     );
 
-    res.json({ message: 'Product deleted successfully' });
+    // Finally delete the product
+    const result = await pool.query(
+      `DELETE FROM products WHERE product_id = $1 RETURNING *`,
+      [parseInt(id)]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Product not found');
+    }
+
+    res.json({ message: 'Product permanently deleted' });
   } catch (error) {
+    console.error('Delete product error:', error);
     next(error);
   }
 });
