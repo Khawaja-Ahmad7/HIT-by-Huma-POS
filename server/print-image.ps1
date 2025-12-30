@@ -44,6 +44,6 @@ catch {
     Write-Error "Print Error: $_"
 }
 finally {
-    $image.Dispose()
-    $printDoc.Dispose()
+    if ($img) { $img.Dispose() }
+    if ($printDoc) { $printDoc.Dispose() }
 }

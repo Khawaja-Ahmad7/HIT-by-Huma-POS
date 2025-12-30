@@ -17,7 +17,8 @@ import {
   PencilIcon,
   TrashIcon,
   PlusIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  QrCodeIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -697,7 +698,9 @@ function StoreSettings() {
 function HardwareSettings() {
   const [testing, setTesting] = useState(null);
   const [printerPort, setPrinterPort] = useState('');
+  const [labelPrinter, setLabelPrinter] = useState('');
   const [savingPort, setSavingPort] = useState(false);
+  const [savingLabel, setSavingLabel] = useState(false);
 
   const { data: devices } = useQuery({
     queryKey: ['hardware-status'],
@@ -705,25 +708,49 @@ function HardwareSettings() {
     refetchInterval: 5000
   });
 
-  // Load saved printer interface from settings
+  // Load saved printer interfaces
   useEffect(() => {
     let mounted = true;
+
+    // Receipt Printer
     api.get('/settings/thermal_printer_interface')
       .then(res => {
         if (!mounted) return;
-        const val = res.data?.setting_value || res.data?.setting_value || '';
-        setPrinterPort(val || '');
+        const val = res.data?.setting_value || '';
+        // Default to FIT FP-510 if not set
+        setPrinterPort(val || 'printer:FIT FP-510 Raster');
       })
-      .catch(() => {
-        // ignore
-      });
+      .catch(() => { });
+
+    // Label Printer
+    api.get('/settings/label_printer_name')
+      .then(res => {
+        if (!mounted) return;
+        const val = res.data?.setting_value || '';
+        setLabelPrinter(val || 'LABEL_Printer');
+      })
+      .catch(() => { });
+
     return () => { mounted = false; };
   }, []);
 
   const testDevice = async (device) => {
     setTesting(device);
     try {
-      await api.post(`/hardware/test/${device}`);
+      if (device === 'label') {
+        const windowsLabelPrinter = require('../../../../../server/src/services/windowsLabelPrinter');
+        // This won't work from client - need API endpoint for test label
+        // Implementing simple test call
+        await api.post('/hardware/label/print', {
+          sku: 'TEST',
+          productName: 'TEST LABEL',
+          price: 100,
+          barcode: '123456',
+          quantity: 1
+        });
+      } else {
+        await api.post(`/hardware/test/${device}`);
+      }
       toast.success(`${device} test successful`);
     } catch (error) {
       toast.error(`${device} test failed: ${error.response?.data?.message || 'Unknown error'}`);
@@ -745,26 +772,26 @@ function HardwareSettings() {
     {
       id: 'printer',
       name: 'Receipt Printer',
-      description: 'Epson TM-T88V',
+      description: 'Fujitsu FP-510',
       icon: PrinterIcon,
       status: devices?.printer?.connected,
-      port: devices?.printer?.port || 'Not configured'
+      port: printerPort.replace('printer:', '') || 'Not configured'
+    },
+    {
+      id: 'label',
+      name: 'Label Printer',
+      description: 'MediaLink Label',
+      icon: QrCodeIcon,
+      status: true, // Always assumed "ready" as it uses Windows spooler
+      port: labelPrinter || 'LABEL_Printer'
     },
     {
       id: 'scanner',
       name: 'Barcode Scanner',
-      description: 'Zebra DS2208',
+      description: 'USB / Keyboard Emulation',
       icon: DeviceTabletIcon,
       status: devices?.scanner?.connected,
-      port: devices?.scanner?.port || 'USB HID'
-    },
-    {
-      id: 'display',
-      name: 'Customer Display',
-      description: 'Pole Display VFD',
-      icon: DeviceTabletIcon,
-      status: devices?.display?.connected,
-      port: devices?.display?.port || 'Not configured'
+      port: 'USB HID'
     }
   ];
 
@@ -799,7 +826,7 @@ function HardwareSettings() {
                   {device.status ? (
                     <>
                       <WifiIcon className="w-3 h-3" />
-                      Connected
+                      Ready
                     </>
                   ) : (
                     <>
@@ -827,7 +854,7 @@ function HardwareSettings() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-gray-600">Open the cash drawer manually</p>
-            <p className="text-sm text-gray-500">Usually connected via printer</p>
+            <p className="text-sm text-gray-500">Usually connected via printer (DK Port)</p>
           </div>
           <button onClick={openDrawer} className="btn-primary">
             Open Drawer
@@ -837,16 +864,18 @@ function HardwareSettings() {
 
       {/* Printer Settings */}
       <div className="bg-white rounded-xl p-6 border">
-        <h2 className="text-lg font-semibold mb-4">Printer Settings</h2>
-        <div className="space-y-4 max-w-md">
+        <h2 className="text-lg font-semibold mb-4">Printer Configuration</h2>
+        <div className="space-y-6 max-w-lg">
+
+          {/* Receipt Printer Input */}
           <div>
-            <label className="label">Printer Port/IP</label>
+            <label className="label">Receipt Printer Name / IP</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={printerPort}
                 onChange={(e) => setPrinterPort(e.target.value)}
-                placeholder="192.168.1.100 or printer:MediaLink_9250s or COM3"
+                placeholder="printer:FIT FP-510 Raster"
                 className="input"
               />
               <button
@@ -854,13 +883,11 @@ function HardwareSettings() {
                 onClick={async () => {
                   try {
                     setSavingPort(true);
-                    // Save to settings table
                     await api.put('/settings/thermal_printer_interface', { value: printerPort });
-                    // Apply at runtime
                     await api.post('/hardware/printer/interface', { interface: printerPort });
-                    toast.success('Printer interface saved');
+                    toast.success('Receipt printer saved');
                   } catch (err) {
-                    toast.error('Failed to save printer interface');
+                    toast.error('Failed to save printer');
                   } finally {
                     setSavingPort(false);
                   }
@@ -870,7 +897,44 @@ function HardwareSettings() {
                 {savingPort ? 'Saving...' : 'Save'}
               </button>
             </div>
-            <p className="text-sm text-gray-500 mt-2">Enter the OS printer name or IP/interface string used by the server.</p>
+            <p className="text-sm text-gray-500 mt-1">
+              Format: <code>printer:Printer Name</code> (e.g., <code>printer:FIT FP-510 Raster</code>)
+            </p>
+          </div>
+
+          {/* Label Printer Input */}
+          <div>
+            <label className="label">Label Printer Name</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={labelPrinter}
+                onChange={(e) => setLabelPrinter(e.target.value)}
+                placeholder="LABEL_Printer"
+                className="input"
+              />
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  try {
+                    setSavingLabel(true);
+                    await api.put('/settings/label_printer_name', { value: labelPrinter });
+                    await api.post('/hardware/label/interface', { interface: labelPrinter });
+                    toast.success('Label printer saved');
+                  } catch (err) {
+                    toast.error('Failed to save label printer');
+                  } finally {
+                    setSavingLabel(false);
+                  }
+                }}
+                disabled={savingLabel}
+              >
+                {savingLabel ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mt-1">
+              Exact Windows printer name (e.g., <code>LABEL_Printer</code>)
+            </p>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <div>

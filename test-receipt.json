@@ -1,0 +1,32 @@
+{
+    "logoPath": "c:\\Users\\KHAWAJA\\Downloads\\POS\\client\\public\\logo.png",
+    "lines": [
+        {
+            "text": "TEST RECEIPT",
+            "align": "center",
+            "bold": true,
+            "size": 14
+        },
+        {
+            "text": "--------------------------------",
+            "align": "center"
+        },
+        {
+            "text": "Item 1                  10.00",
+            "font": "Consolas"
+        },
+        {
+            "text": "Item 2                  20.00",
+            "font": "Consolas"
+        },
+        {
+            "text": "--------------------------------",
+            "align": "center"
+        },
+        {
+            "text": "TOTAL                   30.00",
+            "align": "right",
+            "bold": true
+        }
+    ]
+}

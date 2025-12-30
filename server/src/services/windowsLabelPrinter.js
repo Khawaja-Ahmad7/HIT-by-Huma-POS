@@ -39,6 +39,17 @@ class WindowsLabelPrinter {
     }
 
     /**
+     * Set printer name at runtime
+     */
+    setPrinterName(name) {
+        if (name) {
+            this.printerName = name;
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Ensure temp directory exists
      */
     async ensureTempDir() {
@@ -104,7 +115,11 @@ class WindowsLabelPrinter {
 
         } catch (error) {
             logger.error('Label printing failed:', error);
-            throw new Error(`Label printing failed: ${error.message}`);
+            // Include stdout/stderr if available from exec error
+            if (error.stdout) logger.error('stdout:', error.stdout);
+            if (error.stderr) logger.error('stderr:', error.stderr);
+
+            throw new Error(`Label printing failed: ${error.stderr || error.message}`);
         }
     }
 

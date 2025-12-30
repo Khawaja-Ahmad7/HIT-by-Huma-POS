@@ -76,6 +76,7 @@ export default function POS() {
   const getPaymentMethodId = (type) => {
     // Find by method_type (snake_case from database)
     let method = paymentMethods.find(m => m.method_type === type || m.MethodType === type);
+
     // If not found, try by method_name (case-insensitive)
     if (!method) {
       method = paymentMethods.find(m =>
@@ -83,10 +84,19 @@ export default function POS() {
         m.MethodName?.toLowerCase().includes(type.toLowerCase())
       );
     }
+
     // Return the ID or the first available method as fallback
-    if (method) return method.payment_method_id || method.PaymentMethodID;
+    if (method) {
+      const id = method.payment_method_id || method.PaymentMethodID;
+      return id;
+    }
+
     // Ultimate fallback - return first method's ID if available
-    if (paymentMethods.length > 0) return paymentMethods[0].payment_method_id || paymentMethods[0].PaymentMethodID;
+    if (paymentMethods.length > 0) {
+      const fallbackId = paymentMethods[0].payment_method_id || paymentMethods[0].PaymentMethodID;
+      return fallbackId;
+    }
+
     return null;
   };
 
@@ -128,9 +138,14 @@ export default function POS() {
       // Trigger receipt print - server returns saleId
       const saleId = response.data.saleId || response.data.transaction_id;
       if (saleId) {
-        api.post('/hardware/print-receipt', {
+        api.post('/hardware/printer/receipt', {
           saleId: saleId
-        }).catch(() => { }); // Ignore print errors
+        }).then(() => {
+          toast.success('Receipt printed!');
+        }).catch((err) => {
+          console.error('Print failed:', err);
+          toast.error('Receipt print failed: ' + (err.response?.data?.message || err.message));
+        });
       }
     },
     onError: (error) => {
