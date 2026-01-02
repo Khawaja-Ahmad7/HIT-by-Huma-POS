@@ -84,6 +84,12 @@ async function printReceipt(data, printerInterface, companyName) {
             return label + ' '.repeat(Math.max(1, space)) + val;
         };
         lines.push({ text: totalPair('TOTAL:', String(sale.TotalAmount)), font: 'Consolas', size: 10, bold: true });
+
+        // Show "After Discount" if there was a discount applied
+        if (sale.DiscountAmount > 0) {
+            const afterDiscount = parseFloat(sale.TotalAmount);
+            lines.push({ text: totalPair('After Discount:', String(afterDiscount)), font: 'Consolas', size: 10, bold: true });
+        }
         lines.push({ text: separator, font: 'Consolas', size: 8 });
 
         // Payments
