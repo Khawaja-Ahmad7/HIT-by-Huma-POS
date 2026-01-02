@@ -92,10 +92,10 @@ router.get('/:customerId/purchases/:saleId/items', async (req, res, next) => {
     const { saleId } = req.params;
 
     const result = await db.query(
-      `SELECT si.*, pv.sku, pv.variant_name, p.product_name
+      `SELECT si.*, pv.sku, pv.variant_name, COALESCE(p.product_name, si.notes) as product_name
        FROM sale_items si
-       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
-       INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
+       LEFT JOIN products p ON pv.product_id = p.product_id
        WHERE si.sale_id = @saleId`,
       { saleId: parseInt(saleId) }
     );
