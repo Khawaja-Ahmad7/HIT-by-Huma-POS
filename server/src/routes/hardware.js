@@ -48,9 +48,9 @@ router.post('/printer/receipt', authorize('pos'), async (req, res) => {
 
       const saleData = saleResult.rows[0];
 
-      // Fetch sale items
+      // Fetch sale items (including manual items with NULL variant_id)
       const itemsResult = await pool.query(
-        `SELECT si.*, pv.variant_name AS "VariantName", p.product_name AS "ProductName"
+        `SELECT si.*, pv.variant_name AS "VariantName", COALESCE(p.product_name, si.notes) AS "ProductName"
          FROM sale_items si
          LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
          LEFT JOIN products p ON pv.product_id = p.product_id
