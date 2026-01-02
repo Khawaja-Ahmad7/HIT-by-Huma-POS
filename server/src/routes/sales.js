@@ -177,8 +177,15 @@ router.post('/', [
     // Use pool directly for PostgreSQL
     const pool = db.getPool();
 
-    // Validate stock for all items
+    // Validate stock for all items (skip manual items)
     for (const item of items) {
+      // Skip stock validation for manual items
+      const isManualItem = item.isManual || (typeof item.variantId === 'string' && item.variantId.startsWith('manual-'));
+      if (isManualItem) {
+        console.log(`Skipping stock validation for manual item: ${item.name || item.productName}`);
+        continue;
+      }
+
       if (item.quantity > 0) {
         const invCheck = await pool.query(
           `SELECT quantity_on_hand FROM inventory WHERE variant_id = $1 AND location_id = $2`,
@@ -217,50 +224,65 @@ router.post('/', [
 
     // Insert sale items and update inventory
     for (const item of items) {
-      console.log(`Processing sale item: variantId=${item.variantId}, quantity=${item.quantity}, locationId=${locationId}`);
+      // Check if this is a manual item
+      const isManualItem = item.isManual || (typeof item.variantId === 'string' && item.variantId.startsWith('manual-'));
 
-      await pool.query(
-        `INSERT INTO sale_items (sale_id, variant_id, quantity, unit_price, discount_amount, tax_amount, line_total)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [saleId, item.variantId, item.quantity, item.unitPrice, item.discountAmount || 0, item.taxAmount || 0, item.unitPrice * item.quantity]
-      );
+      console.log(`Processing sale item: variantId=${item.variantId}, isManual=${isManualItem}, quantity=${item.quantity}, locationId=${locationId}`);
 
-      // Check if inventory record exists
-      const invCheck = await pool.query(
-        `SELECT inventory_id, quantity_on_hand FROM inventory WHERE variant_id = $1 AND location_id = $2`,
-        [item.variantId, locationId]
-      );
-
-      if (invCheck.rows.length === 0) {
-        // Create inventory record with negative stock (will need adjustment)
-        console.log(`No inventory record found for variant ${item.variantId} at location ${locationId}, creating one`);
+      if (isManualItem) {
+        // For manual items, insert with NULL variant_id and store the item name in notes
         await pool.query(
-          `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, quantity_reserved, reorder_level, reorder_quantity)
-           VALUES ($1, $2, -$3, 0, 10, 10)`,
-          [item.variantId, locationId, item.quantity]
+          `INSERT INTO sale_items (sale_id, variant_id, quantity, unit_price, discount_amount, tax_amount, line_total, notes)
+           VALUES ($1, NULL, $2, $3, $4, $5, $6, $7)`,
+          [saleId, item.quantity, item.unitPrice, item.discountAmount || 0, item.taxAmount || 0, item.unitPrice * item.quantity, `Manual: ${item.name || item.productName || 'Custom Item'}`]
         );
+        // Skip inventory operations for manual items
+        console.log(`Manual item "${item.name || item.productName}" added without inventory tracking`);
       } else {
-        const currentStock = invCheck.rows[0].quantity_on_hand;
-        console.log(`Current stock for variant ${item.variantId}: ${currentStock}, deducting ${item.quantity}`);
-
-        // Update inventory
-        const updateResult = await pool.query(
-          `UPDATE inventory SET quantity_on_hand = quantity_on_hand - $1, updated_at = CURRENT_TIMESTAMP
-           WHERE variant_id = $2 AND location_id = $3
-           RETURNING quantity_on_hand`,
-          [item.quantity, item.variantId, locationId]
+        // Regular item - insert with variant_id and update inventory
+        await pool.query(
+          `INSERT INTO sale_items (sale_id, variant_id, quantity, unit_price, discount_amount, tax_amount, line_total)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [saleId, item.variantId, item.quantity, item.unitPrice, item.discountAmount || 0, item.taxAmount || 0, item.unitPrice * item.quantity]
         );
 
-        console.log(`New stock for variant ${item.variantId}: ${updateResult.rows[0]?.quantity_on_hand}`);
-      }
+        // Check if inventory record exists
+        const invCheck = await pool.query(
+          `SELECT inventory_id, quantity_on_hand FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+          [item.variantId, locationId]
+        );
 
-      // Log inventory transaction
-      await pool.query(
-        `INSERT INTO inventory_transactions (variant_id, location_id, transaction_type, quantity_change, quantity_before, quantity_after, reference_type, reference_id, user_id)
-         SELECT $1, $2, 'SALE', $3, COALESCE(quantity_on_hand, 0) + $4, COALESCE(quantity_on_hand, 0), 'SALE', $5, $6
-         FROM inventory WHERE variant_id = $1 AND location_id = $2`,
-        [item.variantId, locationId, -item.quantity, item.quantity, saleId, req.user.user_id]
-      );
+        if (invCheck.rows.length === 0) {
+          // Create inventory record with negative stock (will need adjustment)
+          console.log(`No inventory record found for variant ${item.variantId} at location ${locationId}, creating one`);
+          await pool.query(
+            `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, quantity_reserved, reorder_level, reorder_quantity)
+             VALUES ($1, $2, -$3, 0, 10, 10)`,
+            [item.variantId, locationId, item.quantity]
+          );
+        } else {
+          const currentStock = invCheck.rows[0].quantity_on_hand;
+          console.log(`Current stock for variant ${item.variantId}: ${currentStock}, deducting ${item.quantity}`);
+
+          // Update inventory
+          const updateResult = await pool.query(
+            `UPDATE inventory SET quantity_on_hand = quantity_on_hand - $1, updated_at = CURRENT_TIMESTAMP
+             WHERE variant_id = $2 AND location_id = $3
+             RETURNING quantity_on_hand`,
+            [item.quantity, item.variantId, locationId]
+          );
+
+          console.log(`New stock for variant ${item.variantId}: ${updateResult.rows[0]?.quantity_on_hand}`);
+        }
+
+        // Log inventory transaction (only for regular items)
+        await pool.query(
+          `INSERT INTO inventory_transactions (variant_id, location_id, transaction_type, quantity_change, quantity_before, quantity_after, reference_type, reference_id, user_id)
+           SELECT $1, $2, 'SALE', $3, COALESCE(quantity_on_hand, 0) + $4, COALESCE(quantity_on_hand, 0), 'SALE', $5, $6
+           FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+          [item.variantId, locationId, -item.quantity, item.quantity, saleId, req.user.user_id]
+        );
+      }
     }
 
     // Insert payments

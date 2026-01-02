@@ -232,13 +232,13 @@ CREATE TABLE IF NOT EXISTS sales (
 CREATE TABLE IF NOT EXISTS sale_items (
     sale_item_id SERIAL PRIMARY KEY,
     sale_id INT NOT NULL REFERENCES sales(sale_id) ON DELETE CASCADE,
-    variant_id INT NOT NULL REFERENCES product_variants(variant_id),
+    variant_id INT REFERENCES product_variants(variant_id),  -- Nullable for manual items
     quantity INT NOT NULL,
     unit_price DECIMAL(18,2) NOT NULL,
     discount_amount DECIMAL(18,2) DEFAULT 0,
     tax_amount DECIMAL(18,2) DEFAULT 0,
     line_total DECIMAL(18,2) NOT NULL,
-    notes VARCHAR(500),
+    notes VARCHAR(500),  -- Used to store manual item name when variant_id is NULL
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
