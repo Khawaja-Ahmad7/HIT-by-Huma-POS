@@ -11,6 +11,7 @@ import {
   ArrowPathIcon,
   CreditCardIcon,
   BanknotesIcon,
+  TagIcon,
   XMarkIcon,
   QrCodeIcon,
   PrinterIcon,
@@ -27,6 +28,9 @@ export default function POS() {
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [showSuspendedModal, setShowSuspendedModal] = useState(false);
   const [showSplitPaymentModal, setShowSplitPaymentModal] = useState(false);
+  const [showItemDiscountModal, setShowItemDiscountModal] = useState(false);
+  const [selectedItemForDiscount, setSelectedItemForDiscount] = useState(null);
+  const [showManualItemModal, setShowManualItemModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const searchInputRef = useRef(null);
   const lastScanRef = useRef('');
@@ -47,7 +51,8 @@ export default function POS() {
     getTotal,
     suspendCart,
     resumeCart,
-    getSuspendedCarts
+    getSuspendedCarts,
+    applyItemDiscount
   } = useCartStore();
 
   // Fetch categories
@@ -573,73 +578,116 @@ export default function POS() {
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
               <ReceiptPercentIcon className="w-16 h-16 mb-4" />
               <p className="text-lg">Cart is empty</p>
-              <p className="text-sm">Scan or select products to add</p>
+              <p className="text-sm mb-4">Scan or select products to add</p>
+              <button
+                onClick={() => setShowManualItemModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-primary-100 text-primary-700 rounded-lg hover:bg-primary-200 transition-colors"
+              >
+                <PlusIcon className="w-5 h-5" />
+                Add Manual Item
+              </button>
             </div>
           ) : (
-            items.map((item) => {
-              // Display product name, with variant suffix if not "Default"
-              const displayName = item.name && item.name !== 'Default'
-                ? item.name
-                : (item.productName || item.name || 'Unknown Product');
-              const variantLabel = item.name && item.name !== 'Default' && item.name !== item.productName
-                ? item.name.replace(item.productName + ' - ', '')
-                : null;
+            <>
+              {items.map((item) => {
+                // Display product name, with variant suffix if not "Default"
+                const displayName = item.name && item.name !== 'Default'
+                  ? item.name
+                  : (item.productName || item.name || 'Unknown Product');
+                const variantLabel = item.name && item.name !== 'Default' && item.name !== item.productName
+                  ? item.name.replace(item.productName + ' - ', '')
+                  : null;
 
-              return (
-                <div
-                  key={item.variantId || `${item.productId}-Rs. {item.sku}`}
-                  className="bg-gray-50 rounded-lg p-3"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="w-12 h-12 bg-gray-200 rounded-lg flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-gray-900 truncate">{displayName}</h4>
-                      {variantLabel && (
-                        <p className="text-xs text-gray-500">{variantLabel}</p>
-                      )}
-                      <p className="text-sm text-primary-600 font-medium">
-                        Rs. {parseFloat(item.price).toFixed(2)}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => removeItem(item.variantId)}
-                      className="p-1 text-gray-400 hover:text-red-500"
-                    >
-                      <XMarkIcon className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="flex items-center gap-2">
+                return (
+                  <div
+                    key={item.variantId || `${item.productId}-Rs. {item.sku}`}
+                    className="bg-gray-50 rounded-lg p-3"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-12 h-12 bg-gray-200 rounded-lg flex-shrink-0 flex items-center justify-center">
+                        {item.isManual && <TagIcon className="w-6 h-6 text-gray-400" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-gray-900 truncate">{displayName}</h4>
+                        {variantLabel && (
+                          <p className="text-xs text-gray-500">{variantLabel}</p>
+                        )}
+                        {item.isManual && (
+                          <span className="text-xs text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded">Manual</span>
+                        )}
+                        <p className="text-sm text-primary-600 font-medium">
+                          Rs. {parseFloat(item.price).toFixed(2)}
+                        </p>
+                      </div>
                       <button
-                        onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
-                        className="w-8 h-8 flex items-center justify-center bg-white border rounded-lg hover:bg-gray-100"
+                        onClick={() => removeItem(item.variantId)}
+                        className="p-1 text-gray-400 hover:text-red-500"
                       >
-                        <MinusIcon className="w-4 h-4" />
+                        <XMarkIcon className="w-4 h-4" />
                       </button>
-                      <span className="w-8 text-center font-medium">{item.quantity}</span>
+                    </div>
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
+                          className="w-8 h-8 flex items-center justify-center bg-white border rounded-lg hover:bg-gray-100"
+                        >
+                          <MinusIcon className="w-4 h-4" />
+                        </button>
+                        <span className="w-8 text-center font-medium">{item.quantity}</span>
+                        <button
+                          onClick={() => {
+                            const canIncrease = updateQuantity(item.variantId, item.quantity + 1);
+                            if (!canIncrease && !item.isManual) {
+                              toast.error(`Only ${item.stock} available in stock`);
+                            }
+                          }}
+                          disabled={!item.isManual && item.stock !== undefined && item.stock !== null && item.quantity >= item.stock}
+                          className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${!item.isManual && item.stock !== undefined && item.stock !== null && item.quantity >= item.stock
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'hover:bg-gray-100'
+                            }`}
+                        >
+                          <PlusIcon className="w-4 h-4" />
+                        </button>
+                      </div>
                       <button
                         onClick={() => {
-                          const canIncrease = updateQuantity(item.variantId, item.quantity + 1);
-                          if (!canIncrease) {
-                            toast.error(`Only ${item.stock} available in stock`);
-                          }
+                          setSelectedItemForDiscount(item);
+                          setShowItemDiscountModal(true);
                         }}
-                        disabled={item.stock !== undefined && item.stock !== null && item.quantity >= item.stock}
-                        className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${item.stock !== undefined && item.stock !== null && item.quantity >= item.stock
-                          ? 'opacity-50 cursor-not-allowed'
-                          : 'hover:bg-gray-100'
+                        className={`p-1.5 rounded-lg transition-colors ${item.discountAmount > 0
+                          ? 'bg-green-100 text-green-600 hover:bg-green-200'
+                          : 'text-gray-400 hover:text-primary-600 hover:bg-gray-100'
                           }`}
+                        title="Add Discount"
                       >
-                        <PlusIcon className="w-4 h-4" />
+                        <TagIcon className="w-4 h-4" />
                       </button>
                     </div>
-                    <span className="font-semibold text-gray-900">
-                      Rs. {(item.quantity * parseFloat(item.price)).toFixed(2)}
-                    </span>
+                    <div className="flex items-center justify-between mt-2">
+                      {item.discountAmount > 0 && (
+                        <span className="text-xs text-green-600 font-medium">
+                          -Rs. {item.discountAmount.toFixed(2)} discount
+                        </span>
+                      )}
+                      <span className={`font-semibold text-gray-900 ${item.discountAmount > 0 ? '' : 'ml-auto'}`}>
+                        Rs. {((item.quantity * parseFloat(item.price)) - (item.discountAmount || 0)).toFixed(2)}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+
+              {/* Add Manual Item Button */}
+              <button
+                onClick={() => setShowManualItemModal(true)}
+                className="w-full border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-gray-500 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+              >
+                <PlusIcon className="w-8 h-8 mb-1" />
+                <span className="text-sm font-medium">Add Manual Item</span>
+              </button>
+            </>
           )}
         </div>
 
@@ -804,6 +852,35 @@ export default function POS() {
           onClose={() => setShowSplitPaymentModal(false)}
           onConfirm={handleSplitPayment}
           isProcessing={processSaleMutation.isPending}
+        />
+      )}
+
+      {/* Item Discount Modal */}
+      {showItemDiscountModal && selectedItemForDiscount && (
+        <ItemDiscountModal
+          item={selectedItemForDiscount}
+          onClose={() => {
+            setShowItemDiscountModal(false);
+            setSelectedItemForDiscount(null);
+          }}
+          onApply={(discountAmount) => {
+            applyItemDiscount(selectedItemForDiscount.variantId, discountAmount);
+            setShowItemDiscountModal(false);
+            setSelectedItemForDiscount(null);
+            toast.success('Discount applied');
+          }}
+        />
+      )}
+
+      {/* Manual Item Modal */}
+      {showManualItemModal && (
+        <ManualItemModal
+          onClose={() => setShowManualItemModal(false)}
+          onAdd={(item) => {
+            addItem(item);
+            setShowManualItemModal(false);
+            toast.success(`Added: ${item.name}`);
+          }}
         />
       )}
     </div>
@@ -1076,6 +1153,215 @@ function DiscountModal({ currentDiscount, subtotal, onClose, onApply }) {
             Apply Discount
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Item Discount Modal Component
+function ItemDiscountModal({ item, onClose, onApply }) {
+  const [discountType, setDiscountType] = useState('percent');
+  const [discountValue, setDiscountValue] = useState(
+    item.discountAmount > 0 ? item.discountAmount.toString() : ''
+  );
+
+  const lineTotal = item.quantity * parseFloat(item.price);
+
+  const calculateDiscount = () => {
+    const value = parseFloat(discountValue) || 0;
+    if (discountType === 'percent') {
+      return Math.min((lineTotal * value) / 100, lineTotal);
+    }
+    return Math.min(value, lineTotal);
+  };
+
+  const clearDiscount = () => {
+    onApply(0);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-semibold">Item Discount</h3>
+          <button onClick={onClose}>
+            <XMarkIcon className="w-6 h-6 text-gray-400" />
+          </button>
+        </div>
+
+        {/* Item info */}
+        <div className="bg-gray-50 rounded-lg p-3 mb-4">
+          <h4 className="font-medium text-gray-900">{item.name}</h4>
+          <div className="flex justify-between text-sm text-gray-600 mt-1">
+            <span>{item.quantity} × Rs. {parseFloat(item.price).toFixed(2)}</span>
+            <span className="font-medium">Rs. {lineTotal.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setDiscountType('percent')}
+            className={`flex-1 py-2 rounded-lg font-medium ${discountType === 'percent'
+              ? 'bg-primary-600 text-white'
+              : 'bg-gray-100 text-gray-700'
+              }`}
+          >
+            Percentage %
+          </button>
+          <button
+            onClick={() => setDiscountType('fixed')}
+            className={`flex-1 py-2 rounded-lg font-medium ${discountType === 'fixed'
+              ? 'bg-primary-600 text-white'
+              : 'bg-gray-100 text-gray-700'
+              }`}
+          >
+            Fixed Rs.
+          </button>
+        </div>
+
+        <div className="relative mb-4">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+            {discountType === 'percent' ? '%' : 'Rs.'}
+          </span>
+          <input
+            type="number"
+            value={discountValue}
+            onChange={(e) => setDiscountValue(e.target.value)}
+            placeholder="Enter discount"
+            className="w-full pl-12 pr-4 py-3 border rounded-lg text-xl font-medium"
+            min="0"
+            max={discountType === 'percent' ? 100 : lineTotal}
+            autoFocus
+          />
+        </div>
+
+        <div className="text-center mb-4 p-3 bg-gray-50 rounded-lg">
+          <p className="text-gray-500">Discount Amount</p>
+          <p className="text-2xl font-bold text-green-600">
+            -Rs. {calculateDiscount().toFixed(2)}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            New Total: Rs. {(lineTotal - calculateDiscount()).toFixed(2)}
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          {item.discountAmount > 0 && (
+            <button
+              onClick={clearDiscount}
+              className="btn btn-secondary text-red-600 hover:bg-red-50"
+            >
+              Remove
+            </button>
+          )}
+          <button onClick={onClose} className="flex-1 btn btn-secondary">
+            Cancel
+          </button>
+          <button
+            onClick={() => onApply(calculateDiscount())}
+            className="flex-1 btn-primary"
+            disabled={!discountValue || parseFloat(discountValue) <= 0}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Manual Item Modal Component
+function ManualItemModal({ onClose, onAdd }) {
+  const [itemName, setItemName] = useState('');
+  const [itemPrice, setItemPrice] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!itemName.trim()) {
+      toast.error('Please enter item name');
+      return;
+    }
+    const price = parseFloat(itemPrice);
+    if (isNaN(price) || price <= 0) {
+      toast.error('Please enter a valid price');
+      return;
+    }
+
+    // Generate a unique ID for the manual item
+    const manualItem = {
+      variantId: `manual-${Date.now()}`,
+      sku: 'MANUAL',
+      name: itemName.trim(),
+      productName: itemName.trim(),
+      price: price,
+      originalPrice: price,
+      quantity: 1,
+      discountAmount: 0,
+      isManual: true,
+      stock: Infinity // No stock limit for manual items
+    };
+
+    onAdd(manualItem);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-semibold">Add Manual Item</h3>
+          <button onClick={onClose}>
+            <XMarkIcon className="w-6 h-6 text-gray-400" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Item Name
+              </label>
+              <input
+                type="text"
+                value={itemName}
+                onChange={(e) => setItemName(e.target.value)}
+                placeholder="Enter item name"
+                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Price (Rs.)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">Rs.</span>
+                <input
+                  type="number"
+                  value={itemPrice}
+                  onChange={(e) => setItemPrice(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full pl-12 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-xl font-medium"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-2 mt-6">
+            <button type="button" onClick={onClose} className="flex-1 btn btn-secondary">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 btn-primary"
+              disabled={!itemName.trim() || !itemPrice || parseFloat(itemPrice) <= 0}
+            >
+              Add to Cart
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
