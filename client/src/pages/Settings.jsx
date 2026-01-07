@@ -18,7 +18,9 @@ import {
   TrashIcon,
   PlusIcon,
   ArrowPathIcon,
-  QrCodeIcon
+  QrCodeIcon,
+  SwatchIcon,
+  ScaleIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -29,6 +31,8 @@ export default function Settings() {
   const tabs = [
     { id: 'store', label: 'Store Info', icon: BuildingStorefrontIcon },
     { id: 'categories', label: 'Categories', icon: TagIcon },
+    { id: 'sizes', label: 'SKU Sizes', icon: ScaleIcon },
+    { id: 'colors', label: 'SKU Colors', icon: SwatchIcon },
     { id: 'hardware', label: 'Hardware', icon: PrinterIcon },
     { id: 'tax', label: 'Tax & Payment', icon: CurrencyDollarIcon },
     { id: 'notifications', label: 'Notifications', icon: BellIcon },
@@ -68,6 +72,8 @@ export default function Settings() {
         <div className="flex-1">
           {activeTab === 'store' && <StoreSettings />}
           {activeTab === 'categories' && <CategorySettings />}
+          {activeTab === 'sizes' && <SizeSettings />}
+          {activeTab === 'colors' && <ColorSettings />}
           {activeTab === 'hardware' && <HardwareSettings />}
           {activeTab === 'tax' && <TaxSettings />}
           {activeTab === 'notifications' && <NotificationSettings />}
@@ -87,6 +93,7 @@ function CategorySettings() {
   const [deleteConfirmId, setDeleteConfirmId] = useState(null); // For delete confirmation
   const [formData, setFormData] = useState({
     category_name: '',
+    category_code: '',
     description: '',
     sort_order: 1  // Changed from 0 - sort order is now required
   });
@@ -102,7 +109,7 @@ function CategorySettings() {
       queryClient.invalidateQueries(['categories']);
       toast.success('Category created successfully');
       setShowAddForm(false);
-      setFormData({ category_name: '', description: '', sort_order: 0 });
+      setFormData({ category_name: '', category_code: '', description: '', sort_order: 0 });
     },
     onError: (error) => toast.error(error.response?.data?.message || 'Failed to create category')
   });
@@ -148,6 +155,7 @@ function CategorySettings() {
     setEditingCategory(category);
     setFormData({
       category_name: category.category_name,
+      category_code: category.category_code || '',
       description: category.description || '',
       sort_order: category.sort_order || 0,
       is_active: category.is_active
@@ -158,7 +166,7 @@ function CategorySettings() {
   const cancelEdit = () => {
     setEditingCategory(null);
     setShowAddForm(false);
-    setFormData({ category_name: '', description: '', sort_order: 0 });
+    setFormData({ category_name: '', category_code: '', description: '', sort_order: 0 });
   };
 
   if (isLoading) {
@@ -213,6 +221,18 @@ function CategorySettings() {
                   min="1"
                   required
                 />
+              </div>
+              <div>
+                <label className="label">Category Code (for SKU)</label>
+                <input
+                  type="text"
+                  value={formData.category_code}
+                  onChange={(e) => setFormData({ ...formData, category_code: e.target.value.toUpperCase().slice(0, 3) })}
+                  className="input font-mono"
+                  placeholder="e.g., VLV"
+                  maxLength={3}
+                />
+                <p className="text-xs text-gray-500 mt-1">3-letter code used in SKU generation (e.g., VLV for Velvet)</p>
               </div>
               <div className="md:col-span-2">
                 <label className="label">Description</label>
@@ -272,6 +292,9 @@ function CategorySettings() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <h3 className="font-medium text-gray-900">{category.category_name}</h3>
+                    {category.category_code && (
+                      <span className="px-2 py-0.5 text-xs bg-primary-100 text-primary-700 rounded font-mono">{category.category_code}</span>
+                    )}
                     {!category.is_active && (
                       <span className="px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded">Inactive</span>
                     )}
@@ -340,7 +363,437 @@ function CategorySettings() {
   );
 }
 
+// Size Settings Component for SKU
+function SizeSettings() {
+  const queryClient = useQueryClient();
+  const [editingSize, setEditingSize] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [formData, setFormData] = useState({
+    size_name: '',
+    size_code: '',
+    sort_order: 0
+  });
+
+  const { data: sizes = [], isLoading } = useQuery({
+    queryKey: ['sku-sizes'],
+    queryFn: () => api.get('/products/sku-sizes/all').then(res => res.data)
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data) => api.post('/products/sku-sizes', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['sku-sizes']);
+      toast.success('Size created successfully');
+      setShowAddForm(false);
+      setFormData({ size_name: '', size_code: '', sort_order: 0 });
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to create size')
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => api.put(`/products/sku-sizes/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['sku-sizes']);
+      toast.success('Size updated successfully');
+      setEditingSize(null);
+      setShowAddForm(false);
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to update size')
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => api.delete(`/products/sku-sizes/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['sku-sizes']);
+      toast.success('Size deleted');
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to delete size')
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (editingSize) {
+      updateMutation.mutate({ id: editingSize.size_id, data: formData });
+    } else {
+      createMutation.mutate(formData);
+    }
+  };
+
+  const startEdit = (size) => {
+    setEditingSize(size);
+    setFormData({
+      size_name: size.size_name,
+      size_code: size.size_code,
+      sort_order: size.sort_order || 0
+    });
+    setShowAddForm(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingSize(null);
+    setShowAddForm(false);
+    setFormData({ size_name: '', size_code: '', sort_order: 0 });
+  };
+
+  if (isLoading) {
+    return <div className="animate-pulse bg-gray-100 rounded-xl h-64" />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl p-6 border">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-lg font-semibold">SKU Size Codes</h2>
+            <p className="text-sm text-gray-500">Manage size codes for automatic SKU generation</p>
+          </div>
+          {!showAddForm && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="btn btn-primary flex items-center gap-2"
+            >
+              <PlusIcon className="w-5 h-5" />
+              Add Size
+            </button>
+          )}
+        </div>
+
+        {/* Add/Edit Form */}
+        {showAddForm && (
+          <form onSubmit={handleSubmit} className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-4">
+              {editingSize ? 'Edit Size' : 'Add New Size'}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="label">Size Name *</label>
+                <input
+                  type="text"
+                  value={formData.size_name}
+                  onChange={(e) => setFormData({ ...formData, size_name: e.target.value })}
+                  className="input"
+                  placeholder="e.g., Medium"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Size Code *</label>
+                <input
+                  type="text"
+                  value={formData.size_code}
+                  onChange={(e) => setFormData({ ...formData, size_code: e.target.value.slice(0, 2) })}
+                  className="input font-mono"
+                  placeholder="e.g., 01"
+                  maxLength={2}
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">2-digit code used in SKU</p>
+              </div>
+              <div>
+                <label className="label">Sort Order</label>
+                <input
+                  type="number"
+                  value={formData.sort_order}
+                  onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 0 })}
+                  className="input"
+                  placeholder="0"
+                  min="0"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="submit"
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="btn btn-primary"
+              >
+                {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' :
+                  editingSize ? 'Update Size' : 'Create Size'}
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="btn bg-gray-100 text-gray-700 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Sizes List */}
+        <div className="space-y-2">
+          {sizes.length === 0 ? (
+            <p className="text-center text-gray-500 py-8">No sizes found. Add your first size above.</p>
+          ) : (
+            sizes.map((size) => (
+              <div
+                key={size.size_id}
+                className={`flex items-center justify-between p-4 rounded-lg border ${size.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'}`}
+              >
+                <div className="flex items-center gap-4">
+                  <span className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded font-mono font-medium">
+                    {size.size_code}
+                  </span>
+                  <div>
+                    <h3 className="font-medium text-gray-900">{size.size_name}</h3>
+                    <p className="text-xs text-gray-400">Sort Order: {size.sort_order || 0}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => startEdit(size)}
+                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                    title="Edit"
+                  >
+                    <PencilIcon className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate(size.size_id)}
+                    disabled={deleteMutation.isPending}
+                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                    title="Delete"
+                  >
+                    <TrashIcon className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Color Settings Component for SKU
+function ColorSettings() {
+  const queryClient = useQueryClient();
+  const [editingColor, setEditingColor] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [formData, setFormData] = useState({
+    color_name: '',
+    color_code: '',
+    color_hex: '#000000',
+    sort_order: 0
+  });
+
+  const { data: colors = [], isLoading } = useQuery({
+    queryKey: ['sku-colors'],
+    queryFn: () => api.get('/products/sku-colors/all').then(res => res.data)
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data) => api.post('/products/sku-colors', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['sku-colors']);
+      toast.success('Color created successfully');
+      setShowAddForm(false);
+      setFormData({ color_name: '', color_code: '', color_hex: '#000000', sort_order: 0 });
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to create color')
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => api.put(`/products/sku-colors/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['sku-colors']);
+      toast.success('Color updated successfully');
+      setEditingColor(null);
+      setShowAddForm(false);
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to update color')
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => api.delete(`/products/sku-colors/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['sku-colors']);
+      toast.success('Color deleted');
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to delete color')
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (editingColor) {
+      updateMutation.mutate({ id: editingColor.color_id, data: formData });
+    } else {
+      createMutation.mutate(formData);
+    }
+  };
+
+  const startEdit = (color) => {
+    setEditingColor(color);
+    setFormData({
+      color_name: color.color_name,
+      color_code: color.color_code,
+      color_hex: color.color_hex || '#000000',
+      sort_order: color.sort_order || 0
+    });
+    setShowAddForm(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingColor(null);
+    setShowAddForm(false);
+    setFormData({ color_name: '', color_code: '', color_hex: '#000000', sort_order: 0 });
+  };
+
+  if (isLoading) {
+    return <div className="animate-pulse bg-gray-100 rounded-xl h-64" />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl p-6 border">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-lg font-semibold">SKU Color Codes</h2>
+            <p className="text-sm text-gray-500">Manage color codes for automatic SKU generation</p>
+          </div>
+          {!showAddForm && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="btn btn-primary flex items-center gap-2"
+            >
+              <PlusIcon className="w-5 h-5" />
+              Add Color
+            </button>
+          )}
+        </div>
+
+        {/* Add/Edit Form */}
+        {showAddForm && (
+          <form onSubmit={handleSubmit} className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-4">
+              {editingColor ? 'Edit Color' : 'Add New Color'}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="label">Color Name *</label>
+                <input
+                  type="text"
+                  value={formData.color_name}
+                  onChange={(e) => setFormData({ ...formData, color_name: e.target.value })}
+                  className="input"
+                  placeholder="e.g., Red"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Color Code *</label>
+                <input
+                  type="text"
+                  value={formData.color_code}
+                  onChange={(e) => setFormData({ ...formData, color_code: e.target.value.slice(0, 2) })}
+                  className="input font-mono"
+                  placeholder="e.g., 07"
+                  maxLength={2}
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">2-digit code used in SKU</p>
+              </div>
+              <div>
+                <label className="label">Color Preview</label>
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    value={formData.color_hex}
+                    onChange={(e) => setFormData({ ...formData, color_hex: e.target.value })}
+                    className="w-12 h-10 rounded border cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={formData.color_hex}
+                    onChange={(e) => setFormData({ ...formData, color_hex: e.target.value })}
+                    className="input flex-1 font-mono text-sm"
+                    placeholder="#FF0000"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Sort Order</label>
+                <input
+                  type="number"
+                  value={formData.sort_order}
+                  onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 0 })}
+                  className="input"
+                  placeholder="0"
+                  min="0"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="submit"
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="btn btn-primary"
+              >
+                {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' :
+                  editingColor ? 'Update Color' : 'Create Color'}
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="btn bg-gray-100 text-gray-700 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Colors List */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {colors.length === 0 ? (
+            <p className="text-center text-gray-500 py-8 col-span-2">No colors found. Add your first color above.</p>
+          ) : (
+            colors.map((color) => (
+              <div
+                key={color.color_id}
+                className={`flex items-center justify-between p-4 rounded-lg border ${color.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-8 h-8 rounded-lg border-2 border-gray-200"
+                    style={{ backgroundColor: color.color_hex || '#ccc' }}
+                  />
+                  <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-mono text-sm font-medium">
+                    {color.color_code}
+                  </span>
+                  <div>
+                    <h3 className="font-medium text-gray-900">{color.color_name}</h3>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => startEdit(color)}
+                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                    title="Edit"
+                  >
+                    <PencilIcon className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate(color.color_id)}
+                    disabled={deleteMutation.isPending}
+                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                    title="Delete"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Store Settings Component
+
 function StoreSettings() {
   const queryClient = useQueryClient();
   const [showAddStore, setShowAddStore] = useState(false);

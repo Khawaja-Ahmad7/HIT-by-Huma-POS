@@ -721,6 +721,20 @@ function ProductModal({ product, categories, onClose, onSave }) {
   });
   const locations = locationsData?.locations || [];
 
+  // Fetch SKU sizes for dropdown
+  const { data: skuSizes = [] } = useQuery({
+    queryKey: ['sku-sizes-dropdown'],
+    queryFn: () => api.get('/products/sku-sizes/all').then(res => res.data),
+    staleTime: 0
+  });
+
+  // Fetch SKU colors for dropdown
+  const { data: skuColors = [] } = useQuery({
+    queryKey: ['sku-colors-dropdown'],
+    queryFn: () => api.get('/products/sku-colors/all').then(res => res.data),
+    staleTime: 0
+  });
+
   const [formData, setFormData] = useState({
     name: product?.name || '',
     sku: product?.code || '',
@@ -732,9 +746,12 @@ function ProductModal({ product, categories, onClose, onSave }) {
     initial_stock: product?.totalStock ?? product?.stock ?? 0,
     location_id: '', // Will default to first location
     is_active: product?.isActive ?? true,
-    color: product?.color || '', // Color field
-    size: product?.size || '' // Size field
+    size_id: '', // Size from sku_sizes table
+    color_id: '', // Color from sku_colors table
+    color: product?.color || '', // Color name for label printing
+    size: product?.size || '' // Size name for label printing
   });
+  const [generatingSku, setGeneratingSku] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showLabelModal, setShowLabelModal] = useState(false);
   const [createdProduct, setCreatedProduct] = useState(null);
@@ -999,12 +1016,30 @@ function ProductModal({ product, categories, onClose, onSave }) {
     onSave();
   };
 
-  const generateSKU = () => {
-    const prefix = formData.category_id ?
-      categories?.find(c => c.id === parseInt(formData.category_id))?.name?.substring(0, 3).toUpperCase() : 'PRD';
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const newSku = `${prefix}-${random}`;
-    setFormData({ ...formData, sku: newSku, barcode: generateBarcodeFromSKU(newSku) });
+  const generateSKU = async () => {
+    if (!formData.category_id) {
+      toast.error('Please select a category first');
+      return;
+    }
+
+    setGeneratingSku(true);
+    try {
+      const response = await api.post('/products/generate-sku', {
+        categoryId: parseInt(formData.category_id),
+        sizeId: formData.size_id ? parseInt(formData.size_id) : null,
+        colorId: formData.color_id ? parseInt(formData.color_id) : null
+      });
+
+      const newSku = response.data.sku;
+      const newBarcode = generateBarcodeFromSKU(newSku);
+      setFormData({ ...formData, sku: newSku, barcode: newBarcode });
+      toast.success('SKU generated successfully');
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Failed to generate SKU';
+      toast.error(errorMsg);
+    } finally {
+      setGeneratingSku(false);
+    }
   };
 
   const regenerateBarcode = () => {
@@ -1226,30 +1261,54 @@ function ProductModal({ product, categories, onClose, onSave }) {
               </div>
             </div>
 
-            {/* Color and Size Fields */}
+            {/* Color and Size Dropdowns */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="label">Color (Optional)</label>
-                <input
-                  type="text"
-                  value={formData.color}
-                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                  placeholder="e.g., Red, Blue, Black"
+                <label className="label">Size</label>
+                <select
+                  value={formData.size_id}
+                  onChange={(e) => {
+                    const selectedSize = skuSizes.find(s => s.size_id === parseInt(e.target.value));
+                    setFormData({
+                      ...formData,
+                      size_id: e.target.value,
+                      size: selectedSize?.size_name || ''
+                    });
+                  }}
                   className="input"
-                />
+                >
+                  <option value="">Select Size</option>
+                  {skuSizes.map((size) => (
+                    <option key={size.size_id} value={size.size_id}>
+                      {size.size_name} ({size.size_code})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className="label">Size (Optional)</label>
-                <input
-                  type="text"
-                  value={formData.size}
-                  onChange={(e) => setFormData({ ...formData, size: e.target.value })}
-                  placeholder="e.g., S, M, L, XL"
+                <label className="label">Color</label>
+                <select
+                  value={formData.color_id}
+                  onChange={(e) => {
+                    const selectedColor = skuColors.find(c => c.color_id === parseInt(e.target.value));
+                    setFormData({
+                      ...formData,
+                      color_id: e.target.value,
+                      color: selectedColor?.color_name || ''
+                    });
+                  }}
                   className="input"
-                />
+                >
+                  <option value="">Select Color</option>
+                  {skuColors.map((color) => (
+                    <option key={color.color_id} value={color.color_id}>
+                      {color.color_name} ({color.color_code})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
-            <p className="text-xs text-gray-500 -mt-2">Color and Size will be printed on the product label</p>
+            <p className="text-xs text-gray-500 -mt-2">Size and Color are used for SKU generation and printed on the product label</p>
 
             {/* Active Status */}
             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">

@@ -253,7 +253,7 @@ router.get('/:id', async (req, res, next) => {
 // Create category
 router.post('/categories', authorize('admin', 'manager'), async (req, res, next) => {
   try {
-    const { category_name, description, sort_order = 0 } = req.body;
+    const { category_name, description, sort_order = 0, category_code } = req.body;
 
     if (!category_name) {
       throw new ValidationError('Category name is required');
@@ -274,11 +274,25 @@ router.post('/categories', authorize('admin', 'manager'), async (req, res, next)
       });
     }
 
+    // Check if category_code already exists (if provided)
+    if (category_code) {
+      const existingCode = await pool.query(
+        `SELECT category_id FROM categories WHERE UPPER(category_code) = UPPER($1)`,
+        [category_code]
+      );
+      if (existingCode.rows.length > 0) {
+        return res.status(400).json({
+          error: 'Category code already exists',
+          message: `A category with code "${category_code}" already exists`
+        });
+      }
+    }
+
     const result = await pool.query(
-      `INSERT INTO categories (category_name, description, sort_order, is_active)
-       VALUES ($1, $2, $3, true)
+      `INSERT INTO categories (category_name, description, sort_order, category_code, is_active)
+       VALUES ($1, $2, $3, $4, true)
        RETURNING *`,
-      [category_name, description || null, sort_order]
+      [category_name, description || null, sort_order, category_code ? category_code.toUpperCase() : null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -287,7 +301,7 @@ router.post('/categories', authorize('admin', 'manager'), async (req, res, next)
     if (error.code === '23505') {
       return res.status(400).json({
         error: 'Category already exists',
-        message: `A category with this name already exists`
+        message: `A category with this name or code already exists`
       });
     }
     next(error);
@@ -298,19 +312,34 @@ router.post('/categories', authorize('admin', 'manager'), async (req, res, next)
 router.put('/categories/:id', authorize('admin', 'manager'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { category_name, description, sort_order, is_active } = req.body;
+    const { category_name, description, sort_order, is_active, category_code } = req.body;
 
     if (!category_name) {
       throw new ValidationError('Category name is required');
     }
 
     const pool = db.getPool();
+
+    // Check if category_code already exists for another category (if provided)
+    if (category_code) {
+      const existingCode = await pool.query(
+        `SELECT category_id FROM categories WHERE UPPER(category_code) = UPPER($1) AND category_id != $2`,
+        [category_code, id]
+      );
+      if (existingCode.rows.length > 0) {
+        return res.status(400).json({
+          error: 'Category code already exists',
+          message: `A category with code "${category_code}" already exists`
+        });
+      }
+    }
+
     const result = await pool.query(
       `UPDATE categories 
-       SET category_name = $1, description = $2, sort_order = $3, is_active = $4
-       WHERE category_id = $5
+       SET category_name = $1, description = $2, sort_order = $3, is_active = $4, category_code = $5, updated_at = CURRENT_TIMESTAMP
+       WHERE category_id = $6
        RETURNING *`,
-      [category_name, description || null, sort_order || 0, is_active !== false, id]
+      [category_name, description || null, sort_order || 0, is_active !== false, category_code ? category_code.toUpperCase() : null, id]
     );
 
     if (result.rows.length === 0) {
@@ -386,6 +415,343 @@ router.delete('/categories/:id', authorize('admin', 'manager'), async (req, res,
     }
 
     res.json({ success: true, message: 'Category permanently deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =============================================
+// SKU SIZES ROUTES
+// =============================================
+
+// Get all SKU sizes
+router.get('/sku-sizes', async (req, res, next) => {
+  try {
+    const pool = db.getPool();
+    const result = await pool.query(
+      `SELECT * FROM sku_sizes WHERE is_active = true ORDER BY sort_order, size_name`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get all SKU sizes (including inactive) for management
+router.get('/sku-sizes/all', async (req, res, next) => {
+  try {
+    const pool = db.getPool();
+    const result = await pool.query(
+      `SELECT * FROM sku_sizes ORDER BY sort_order, size_name`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create SKU size
+router.post('/sku-sizes', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { size_name, size_code, sort_order = 0 } = req.body;
+
+    if (!size_name || !size_code) {
+      throw new ValidationError('Size name and code are required');
+    }
+
+    if (size_code.length !== 2) {
+      throw new ValidationError('Size code must be exactly 2 characters');
+    }
+
+    const pool = db.getPool();
+    const result = await pool.query(
+      `INSERT INTO sku_sizes (size_name, size_code, sort_order, is_active)
+       VALUES ($1, $2, $3, true)
+       RETURNING *`,
+      [size_name, size_code]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({
+        error: 'Size already exists',
+        message: 'A size with this name or code already exists'
+      });
+    }
+    next(error);
+  }
+});
+
+// Update SKU size
+router.put('/sku-sizes/:id', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { size_name, size_code, sort_order, is_active } = req.body;
+
+    if (!size_name || !size_code) {
+      throw new ValidationError('Size name and code are required');
+    }
+
+    if (size_code.length !== 2) {
+      throw new ValidationError('Size code must be exactly 2 characters');
+    }
+
+    const pool = db.getPool();
+    const result = await pool.query(
+      `UPDATE sku_sizes 
+       SET size_name = $1, size_code = $2, sort_order = $3, is_active = $4, updated_at = CURRENT_TIMESTAMP
+       WHERE size_id = $5
+       RETURNING *`,
+      [size_name, size_code, sort_order || 0, is_active !== false, id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Size not found');
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({
+        error: 'Size already exists',
+        message: 'A size with this name or code already exists'
+      });
+    }
+    next(error);
+  }
+});
+
+// Delete SKU size
+router.delete('/sku-sizes/:id', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const pool = db.getPool();
+
+    const result = await pool.query(
+      `DELETE FROM sku_sizes WHERE size_id = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Size not found');
+    }
+
+    res.json({ success: true, message: 'Size deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =============================================
+// SKU COLORS ROUTES
+// =============================================
+
+// Get all SKU colors
+router.get('/sku-colors', async (req, res, next) => {
+  try {
+    const pool = db.getPool();
+    const result = await pool.query(
+      `SELECT * FROM sku_colors WHERE is_active = true ORDER BY sort_order, color_name`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get all SKU colors (including inactive) for management
+router.get('/sku-colors/all', async (req, res, next) => {
+  try {
+    const pool = db.getPool();
+    const result = await pool.query(
+      `SELECT * FROM sku_colors ORDER BY sort_order, color_name`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create SKU color
+router.post('/sku-colors', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { color_name, color_code, color_hex, sort_order = 0 } = req.body;
+
+    if (!color_name || !color_code) {
+      throw new ValidationError('Color name and code are required');
+    }
+
+    if (color_code.length !== 2) {
+      throw new ValidationError('Color code must be exactly 2 characters');
+    }
+
+    const pool = db.getPool();
+    const result = await pool.query(
+      `INSERT INTO sku_colors (color_name, color_code, color_hex, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING *`,
+      [color_name, color_code, color_hex || null, sort_order]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({
+        error: 'Color already exists',
+        message: 'A color with this name or code already exists'
+      });
+    }
+    next(error);
+  }
+});
+
+// Update SKU color
+router.put('/sku-colors/:id', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { color_name, color_code, color_hex, sort_order, is_active } = req.body;
+
+    if (!color_name || !color_code) {
+      throw new ValidationError('Color name and code are required');
+    }
+
+    if (color_code.length !== 2) {
+      throw new ValidationError('Color code must be exactly 2 characters');
+    }
+
+    const pool = db.getPool();
+    const result = await pool.query(
+      `UPDATE sku_colors 
+       SET color_name = $1, color_code = $2, color_hex = $3, sort_order = $4, is_active = $5, updated_at = CURRENT_TIMESTAMP
+       WHERE color_id = $6
+       RETURNING *`,
+      [color_name, color_code, color_hex || null, sort_order || 0, is_active !== false, id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Color not found');
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({
+        error: 'Color already exists',
+        message: 'A color with this name or code already exists'
+      });
+    }
+    next(error);
+  }
+});
+
+// Delete SKU color
+router.delete('/sku-colors/:id', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const pool = db.getPool();
+
+    const result = await pool.query(
+      `DELETE FROM sku_colors WHERE color_id = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Color not found');
+    }
+
+    res.json({ success: true, message: 'Color deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =============================================
+// SKU GENERATION ROUTE
+// =============================================
+
+// Generate SKU based on category, size, and color
+router.post('/generate-sku', async (req, res, next) => {
+  try {
+    const { categoryId, sizeId, colorId } = req.body;
+
+    if (!categoryId) {
+      throw new ValidationError('Category is required to generate SKU');
+    }
+
+    const pool = db.getPool();
+
+    // Get category code
+    const categoryResult = await pool.query(
+      `SELECT category_code FROM categories WHERE category_id = $1`,
+      [categoryId]
+    );
+
+    if (categoryResult.rows.length === 0) {
+      throw new NotFoundError('Category not found');
+    }
+
+    const categoryCode = categoryResult.rows[0].category_code;
+    if (!categoryCode) {
+      return res.status(400).json({
+        error: 'Category code not set',
+        message: 'Please set a category code in Settings before generating SKU'
+      });
+    }
+
+    // Get next sequence number for this category
+    // Count existing products in this category to determine next number
+    // Use MAX sequence instead of COUNT to avoid duplicates and ensure incremental generation
+    const productsResult = await pool.query(
+      `SELECT product_code FROM products WHERE category_id = $1`,
+      [categoryId]
+    );
+
+    let maxSequence = 0;
+    const prefix = categoryCode.toUpperCase().substring(0, 3);
+
+    productsResult.rows.forEach(row => {
+      const code = row.product_code || '';
+      // Check if code matches the category prefix (e.g., VLV)
+      if (code.toUpperCase().startsWith(prefix)) {
+        // Extract the sequence digits (chars 3-6)
+        const seqPart = code.substring(3, 6);
+        if (/^\d+$/.test(seqPart)) {
+          const seq = parseInt(seqPart, 10);
+          if (seq > maxSequence) maxSequence = seq;
+        }
+      }
+    });
+
+    // Increment max sequence
+    const nextSequence = (maxSequence + 1).toString().padStart(3, '0');
+
+    // Build SKU: Category Code (3) + Sequence (3)
+    let sku = `${categoryCode.toUpperCase().substring(0, 3).padEnd(3, 'X')}${nextSequence}`;
+
+    // Add size code if provided
+    if (sizeId) {
+      const sizeResult = await pool.query(
+        `SELECT size_code FROM sku_sizes WHERE size_id = $1`,
+        [sizeId]
+      );
+      if (sizeResult.rows.length > 0) {
+        sku += `-${sizeResult.rows[0].size_code}`;
+      }
+    }
+
+    // Add color code if provided
+    if (colorId) {
+      const colorResult = await pool.query(
+        `SELECT color_code FROM sku_colors WHERE color_id = $1`,
+        [colorId]
+      );
+      if (colorResult.rows.length > 0) {
+        sku += `-${colorResult.rows[0].color_code}`;
+      }
+    }
+
+    res.json({ sku });
   } catch (error) {
     next(error);
   }
