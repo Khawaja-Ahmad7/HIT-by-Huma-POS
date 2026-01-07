@@ -315,7 +315,11 @@ export default function POS() {
         unitPrice: item.price,
         originalPrice: item.originalPrice || item.price,
         discountAmount: item.discountAmount || 0,
-        taxAmount: 0
+        taxAmount: 0,
+        // Include manual item info for server handling
+        isManual: item.isManual || false,
+        name: item.name || item.productName,
+        productName: item.productName
       })),
       payments: [{
         paymentMethodId: paymentMethodId,
@@ -341,7 +345,11 @@ export default function POS() {
         unitPrice: item.price,
         originalPrice: item.originalPrice || item.price,
         discountAmount: item.discountAmount || 0,
-        taxAmount: 0
+        taxAmount: 0,
+        // Include manual item info for server handling
+        isManual: item.isManual || false,
+        name: item.name || item.productName,
+        productName: item.productName
       })),
       payments: payments,
       discountAmount: discount || 0,

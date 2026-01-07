@@ -71,15 +71,15 @@ router.get('/dashboard', async (req, res, next) => {
       lowStockParams
     );
 
-    // Top products today
+    // Top products today (includes manual items)
     const topProductsResult = await pool.query(
-      `SELECT p.product_name, pv.variant_name, SUM(si.quantity) as sold, SUM(si.line_total) as revenue
+      `SELECT COALESCE(p.product_name, si.notes) as product_name, pv.variant_name, SUM(si.quantity) as sold, SUM(si.line_total) as revenue
        FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
-       INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
+       LEFT JOIN products p ON pv.product_id = p.product_id
        WHERE s.status = 'completed' ${timeFilter} ${locationFilter}
-       GROUP BY p.product_name, pv.variant_name
+       GROUP BY COALESCE(p.product_name, si.notes), pv.variant_name
        ORDER BY sold DESC
        LIMIT 5`,
       params
@@ -191,14 +191,14 @@ router.get('/category-breakdown', async (req, res, next) => {
   try {
     const pool = db.getPool();
     const result = await pool.query(
-      `SELECT c.category_name as name, COALESCE(SUM(si.line_total),0) as revenue, COALESCE(SUM(si.quantity),0) as units
+      `SELECT COALESCE(c.category_name, 'Manual Items') as name, COALESCE(SUM(si.line_total),0) as revenue, COALESCE(SUM(si.quantity),0) as units
        FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
-       INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
+       LEFT JOIN products p ON pv.product_id = p.product_id
        LEFT JOIN categories c ON p.category_id = c.category_id
        WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed'
-       GROUP BY c.category_name
+       GROUP BY COALESCE(c.category_name, 'Manual Items')
        ORDER BY revenue DESC`);
     res.json({ data: result.rows.map(r => ({ name: r.name, revenue: parseFloat(r.revenue) || 0, units: parseInt(r.units) || 0 })) });
   } catch (error) {
@@ -322,17 +322,17 @@ router.get('/sales-by-category', authorize('reports'), async (req, res, next) =>
     }
 
     const result = await pool.query(
-      `SELECT c.category_name, 
+      `SELECT COALESCE(c.category_name, 'Manual Items') as category_name, 
         COUNT(DISTINCT s.sale_id) as transactions,
         SUM(si.quantity) as units_sold,
         COALESCE(SUM(si.line_total), 0) as revenue
        FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
-       INNER JOIN products p ON pv.product_id = p.product_id
+       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
+       LEFT JOIN products p ON pv.product_id = p.product_id
        LEFT JOIN categories c ON p.category_id = c.category_id
        ${whereClause}
-       GROUP BY c.category_name
+       GROUP BY COALESCE(c.category_name, 'Manual Items')
        ORDER BY revenue DESC`,
       params
     );
