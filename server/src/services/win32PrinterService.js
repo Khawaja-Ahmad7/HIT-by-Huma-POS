@@ -40,30 +40,23 @@ async function printReceipt(data, printerInterface, companyName) {
         lines.push({ text: `Cashier: ${sale.CashierFirstName} ${sale.CashierLastName}`, align: 'left' });
         lines.push({ text: separator, align: 'center', font: 'Consolas', size: 8 });
 
-        // Items Header with Discount column
-        lines.push({ text: 'ITEM                QTY  PRICE   DISC.  TOTAL', font: 'Consolas', size: 8, bold: true });
+        lines.push({ text: 'ITEM                     QTY   PRICE   TOTAL', font: 'Consolas', size: 8, bold: true });
         lines.push({ text: separator, font: 'Consolas', size: 8 });
 
         items.forEach(item => {
-            // Extract variant info (size/color) from variant name
-            const productName = item.ProductName || 'Item';
-            const variantInfo = item.VariantName || '';
+            const name = item.ProductName + (item.VariantName ? ` (${item.VariantName})` : '');
             const qty = String(item.Quantity);
             const price = String(item.UnitPrice);
-            const discount = item.DiscountAmount > 0 ? String(item.DiscountAmount) : '-';
             const total = String(item.LineTotal);
 
-            // Line 1: Item name in larger font
-            lines.push({ text: productName, font: 'Arial', size: 10, bold: true });
-
-            // Line 2: Size/Color in smaller font (if variant exists)
-            if (variantInfo) {
-                lines.push({ text: `  ${variantInfo}`, font: 'Consolas', size: 7 });
+            if (name.length > 20) {
+                lines.push({ text: name, font: 'Consolas', size: 8 });
+                const line = pad('', 20) + ' ' + pad(qty, 3) + ' ' + padLeft(price, 8) + ' ' + padLeft(total, 9);
+                lines.push({ text: line, font: 'Consolas', size: 8 });
+            } else {
+                const line = pad(name, 20) + ' ' + pad(qty, 3) + ' ' + padLeft(price, 8) + ' ' + padLeft(total, 9);
+                lines.push({ text: line, font: 'Consolas', size: 8 });
             }
-
-            // Line 3: Qty, Price, Discount, Total
-            const detailLine = pad('', 16) + ' ' + pad(qty, 3) + ' ' + padLeft(price, 6) + ' ' + padLeft(discount, 6) + ' ' + padLeft(total, 7);
-            lines.push({ text: detailLine, font: 'Consolas', size: 8 });
         });
         lines.push({ text: separator, font: 'Consolas', size: 8 });
 
@@ -84,12 +77,6 @@ async function printReceipt(data, printerInterface, companyName) {
             return label + ' '.repeat(Math.max(1, space)) + val;
         };
         lines.push({ text: totalPair('TOTAL:', String(sale.TotalAmount)), font: 'Consolas', size: 10, bold: true });
-
-        // Show "After Discount" if there was a discount applied
-        if (sale.DiscountAmount > 0) {
-            const afterDiscount = parseFloat(sale.TotalAmount);
-            lines.push({ text: totalPair('After Discount:', String(afterDiscount)), font: 'Consolas', size: 10, bold: true });
-        }
         lines.push({ text: separator, font: 'Consolas', size: 8 });
 
         // Payments

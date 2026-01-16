@@ -12,6 +12,7 @@ import Customers from './pages/Customers';
 import Reports from './pages/Reports';
 import Shifts from './pages/Shifts';
 import Settings from './pages/Settings';
+import OnlineOrders from './pages/OnlineOrders';
 
 // Protected Route wrapper - requires authentication
 const ProtectedRoute = ({ children }) => {
@@ -80,6 +81,9 @@ function App() {
 
           {/* POS - All roles */}
           <Route path="pos" element={<POS />} />
+
+          {/* Online Orders - All roles */}
+          <Route path="online-orders" element={<OnlineOrders />} />
 
           {/* Products - All roles but view-only for salesman */}
           <Route path="products" element={<Products />} />

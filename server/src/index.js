@@ -21,6 +21,7 @@ const shiftRoutes = require('./routes/shifts');
 const reportRoutes = require('./routes/reports');
 const settingsRoutes = require('./routes/settings');
 const hardwareRoutes = require('./routes/hardware');
+const ordersRoutes = require('./routes/orders');
 
 const app = express();
 const httpServer = createServer(app);
@@ -101,6 +102,7 @@ app.use(`${API_PREFIX}/shifts`, shiftRoutes);
 app.use(`${API_PREFIX}/reports`, reportRoutes);
 app.use(`${API_PREFIX}/settings`, settingsRoutes);
 app.use(`${API_PREFIX}/hardware`, hardwareRoutes);
+app.use(`${API_PREFIX}/orders`, ordersRoutes);
 
 // Health Check - always returns 200 for Railway healthcheck
 app.get('/health', async (req, res) => {

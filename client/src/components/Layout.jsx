@@ -17,12 +17,14 @@ import {
   HomeIcon,
   PresentationChartLineIcon,
   EyeIcon,
+  GlobeAltIcon,
 } from '@heroicons/react/24/outline';
 
 // Navigation items with role restrictions
 const allNavItems = [
   { path: '/dashboard', name: 'Dashboard', icon: HomeIcon, roles: ['admin', 'manager'] },
   { path: '/pos', name: 'POS Terminal', icon: ShoppingCartIcon, roles: ['admin', 'manager', 'cashier', 'salesman', 'staff'] },
+  { path: '/online-orders', name: 'Online Orders', icon: GlobeAltIcon, roles: ['admin', 'manager', 'cashier', 'salesman'] },
   { path: '/products', name: 'Products', icon: CubeIcon, roles: ['admin', 'manager', 'salesman', 'staff'], viewOnly: ['salesman'] },
   { path: '/inventory', name: 'Inventory', icon: ArchiveBoxIcon, roles: ['admin', 'manager', 'inventory', 'salesman', 'staff'], viewOnly: ['salesman'] },
   { path: '/customers', name: 'Customers', icon: UsersIcon, roles: ['admin', 'manager', 'cashier', 'salesman', 'staff'] },

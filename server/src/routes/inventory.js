@@ -14,7 +14,7 @@ router.get('/', async (req, res, next) => {
     const offset = (page - 1) * limit;
 
     // Get low stock threshold from settings
-    const pool = db.getPool();
+    const pool = db;
     const thresholdResult = await pool.query(
       `SELECT setting_value FROM settings WHERE setting_key = $1`,
       ['low_stock_threshold']
@@ -39,7 +39,7 @@ router.get('/', async (req, res, next) => {
     }
 
     if (search) {
-      whereClause += ` AND (pv.sku ILIKE $${paramIndex} OR p.product_name ILIKE $${paramIndex})`;
+      whereClause += ` AND (pv.sku LIKE $${paramIndex} OR p.product_name LIKE $${paramIndex})`;
       params.push(`%${search}%`);
       paramIndex++;
     }
@@ -143,7 +143,7 @@ router.get('/check-other-locations/:variantId', async (req, res, next) => {
 // Get locations
 router.get('/locations', async (req, res, next) => {
   try {
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `SELECT * FROM locations WHERE is_active = true ORDER BY location_name`
     );
@@ -369,7 +369,7 @@ router.post('/transfers', authorize('inventory'), async (req, res, next) => {
 // Get inventory alerts (low stock and out of stock)
 router.get('/alerts', async (req, res, next) => {
   try {
-    const pool = db.getPool();
+    const pool = db;
 
     // Get low stock threshold from settings
     const thresholdResult = await pool.query(

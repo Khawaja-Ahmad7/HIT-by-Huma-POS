@@ -17,7 +17,7 @@ router.get('/', async (req, res, next) => {
     const params = { limit: parseInt(limit), offset };
 
     if (search) {
-      whereClause += ' AND (phone ILIKE @search OR first_name ILIKE @search OR last_name ILIKE @search)';
+      whereClause += ' AND (phone LIKE @search OR first_name LIKE @search OR last_name LIKE @search)';
       params.search = `%${search}%`;
     }
 
@@ -92,10 +92,10 @@ router.get('/:customerId/purchases/:saleId/items', async (req, res, next) => {
     const { saleId } = req.params;
 
     const result = await db.query(
-      `SELECT si.*, pv.sku, pv.variant_name, COALESCE(p.product_name, si.notes) as product_name
+      `SELECT si.*, pv.sku, pv.variant_name, p.product_name
        FROM sale_items si
-       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
-       LEFT JOIN products p ON pv.product_id = p.product_id
+       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
+       INNER JOIN products p ON pv.product_id = p.product_id
        WHERE si.sale_id = @saleId`,
       { saleId: parseInt(saleId) }
     );
@@ -131,12 +131,13 @@ router.post('/', [
 
     const result = await db.query(
       `INSERT INTO customers (phone, first_name, last_name, email, address, city, notes)
-       VALUES (@phone, @firstName, @lastName, @email, @address, @city, @notes)
-       RETURNING *`,
+       VALUES (@phone, @firstName, @lastName, @email, @address, @city, @notes)`,
       { phone, firstName, lastName: lastName || null, email: email || null, address: address || null, city: city || null, notes: notes || null }
     );
 
-    res.status(201).json(result.recordset[0]);
+    // Fetch created customer
+    const newCustomer = await db.query('SELECT * FROM customers WHERE customer_id = @id', { id: result.insertId });
+    res.status(201).json(newCustomer.recordset[0]);
   } catch (error) {
     next(error);
   }
@@ -158,16 +159,17 @@ router.put('/:id', async (req, res, next) => {
         city = COALESCE(@city, city),
         notes = COALESCE(@notes, notes),
         updated_at = CURRENT_TIMESTAMP
-       WHERE customer_id = @id
-       RETURNING *`,
+       WHERE customer_id = @id`,
       { id: parseInt(id), phone, firstName, lastName, email, address, city, notes }
     );
 
-    if (result.recordset.length === 0) {
+    if (result.rowsAffected[0] === 0) {
       throw new NotFoundError('Customer not found');
     }
 
-    res.json(result.recordset[0]);
+    // Fetch updated customer
+    const updated = await db.query('SELECT * FROM customers WHERE customer_id = @id', { id: parseInt(id) });
+    res.json(updated.recordset[0]);
   } catch (error) {
     next(error);
   }
@@ -181,16 +183,16 @@ router.post('/:id/wallet/credit', async (req, res, next) => {
 
     const result = await db.query(
       `UPDATE customers SET wallet_balance = wallet_balance + @amount, updated_at = CURRENT_TIMESTAMP
-       WHERE customer_id = @id
-       RETURNING wallet_balance`,
+       WHERE customer_id = @id`,
       { id: parseInt(id), amount }
     );
 
-    if (result.recordset.length === 0) {
+    if (result.rowsAffected[0] === 0) {
       throw new NotFoundError('Customer not found');
     }
 
-    res.json({ success: true, newBalance: result.recordset[0].wallet_balance });
+    const updated = await db.query('SELECT wallet_balance FROM customers WHERE customer_id = @id', { id: parseInt(id) });
+    res.json({ success: true, newBalance: updated.recordset[0].wallet_balance });
   } catch (error) {
     next(error);
   }
@@ -218,12 +220,12 @@ router.post('/:id/wallet/debit', async (req, res, next) => {
 
     const result = await db.query(
       `UPDATE customers SET wallet_balance = wallet_balance - @amount, updated_at = CURRENT_TIMESTAMP
-       WHERE customer_id = @id
-       RETURNING wallet_balance`,
+       WHERE customer_id = @id`,
       { id: parseInt(id), amount }
     );
 
-    res.json({ success: true, newBalance: result.recordset[0].wallet_balance });
+    const updated = await db.query('SELECT wallet_balance FROM customers WHERE customer_id = @id', { id: parseInt(id) });
+    res.json({ success: true, newBalance: updated.recordset[0].wallet_balance });
   } catch (error) {
     next(error);
   }

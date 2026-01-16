@@ -72,8 +72,7 @@ router.post('/clock-in', [
 
     const result = await db.query(
       `INSERT INTO shifts (user_id, location_id, terminal_id, opening_cash, status)
-       VALUES (@userId, @locationId, @terminalId, @openingCash, 'active')
-       RETURNING *`,
+       VALUES (@userId, @locationId, @terminalId, @openingCash, 'active')`,
       {
         userId: req.user.user_id,
         locationId,
@@ -82,7 +81,8 @@ router.post('/clock-in', [
       }
     );
 
-    res.status(201).json({ success: true, shift: result.recordset[0] });
+    const newShift = await db.query('SELECT * FROM shifts WHERE shift_id = @id', { id: result.insertId });
+    res.status(201).json({ success: true, shift: newShift.recordset[0] });
   } catch (error) {
     next(error);
   }
@@ -132,14 +132,15 @@ router.post('/clock-out', [
         end_time = CURRENT_TIMESTAMP,
         status = 'closed',
         notes = @notes
-       WHERE shift_id = @shiftId
-       RETURNING *`,
+       WHERE shift_id = @shiftId`,
       { shiftId, closingCash, expectedCash, cashDifference, notes: notes || null }
     );
 
+    const updated = await db.query('SELECT * FROM shifts WHERE shift_id = @id', { id: shiftId });
+
     res.json({
       success: true,
-      shift: result.recordset[0],
+      shift: updated.recordset[0],
       summary: {
         expectedCash,
         actualCash: closingCash,
@@ -275,7 +276,7 @@ router.get('/calendar/month', async (req, res, next) => {
     const targetMonth = parseInt(month) || (currentDate.getMonth() + 1);
     const targetYear = parseInt(year) || currentDate.getFullYear();
 
-    const pool = db.getPool();
+    const pool = db;
 
     // Get all shifts for the specified month
     const result = await pool.query(
@@ -292,7 +293,7 @@ router.get('/calendar/month', async (req, res, next) => {
         u.employee_code,
         l.location_name,
         DATE(s.start_time) as shift_date,
-        EXTRACT(HOUR FROM s.end_time - s.start_time) as hours_worked
+        TIMESTAMPDIFF(HOUR, s.start_time, s.end_time) as hours_worked
        FROM shifts s
        INNER JOIN users u ON s.user_id = u.user_id
        LEFT JOIN locations l ON s.location_id = l.location_id
@@ -327,7 +328,7 @@ router.get('/calendar/month', async (req, res, next) => {
       `SELECT 
         COUNT(DISTINCT s.shift_id) as total_shifts,
         COUNT(DISTINCT s.user_id) as unique_users,
-        SUM(EXTRACT(EPOCH FROM (s.end_time - s.start_time))/3600) as total_hours
+        SUM(TIMESTAMPDIFF(SECOND, s.start_time, s.end_time)/3600) as total_hours
        FROM shifts s
        WHERE EXTRACT(MONTH FROM s.start_time) = $1
          AND EXTRACT(YEAR FROM s.start_time) = $2

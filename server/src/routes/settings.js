@@ -36,7 +36,7 @@ router.get('/', async (req, res, next) => {
 // Get all locations (MUST be before /:key to prevent interception)
 router.get('/locations/all', async (req, res, next) => {
   try {
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `SELECT * FROM locations ORDER BY location_name`
     );
@@ -55,15 +55,15 @@ router.post('/locations', authorize('settings'), async (req, res, next) => {
       return res.status(400).json({ error: 'Location code and name are required' });
     }
 
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `INSERT INTO locations (location_code, location_name, address, city, phone, email)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [locationCode, locationName, address || null, city || null, phone || null, email || null]
     );
 
-    res.status(201).json(result.rows[0]);
+    const newLocation = await pool.query('SELECT * FROM locations WHERE location_id = ?', [result.insertId]);
+    res.status(201).json(newLocation.rows[0]);
   } catch (error) {
     next(error);
   }
@@ -79,21 +79,21 @@ router.put('/locations/:id', authorize('settings'), async (req, res, next) => {
       return res.status(400).json({ error: 'Location code and name are required' });
     }
 
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `UPDATE locations 
        SET location_code = $1, location_name = $2, address = $3, city = $4, phone = $5, email = $6, 
            is_active = COALESCE($7, is_active), updated_at = CURRENT_TIMESTAMP
-       WHERE location_id = $8
-       RETURNING *`,
+       WHERE location_id = $8`,
       [locationCode, locationName, address || null, city || null, phone || null, email || null, isActive, parseInt(id)]
     );
 
-    if (result.rows.length === 0) {
+    if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: 'Location not found' });
     }
 
-    res.json(result.rows[0]);
+    const updated = await pool.query('SELECT * FROM locations WHERE location_id = ?', [parseInt(id)]);
+    res.json(updated.rows[0]);
   } catch (error) {
     next(error);
   }
@@ -105,7 +105,7 @@ router.get('/:key', async (req, res, next) => {
     const { key } = req.params;
 
     // Use pool directly for positional parameters
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `SELECT * FROM settings WHERE setting_key = $1`,
       [key]
@@ -128,17 +128,16 @@ router.put('/:key', authorize('settings'), async (req, res, next) => {
     const { value } = req.body;
 
     // Use pool directly for positional parameters
-    const pool = db.getPool();
+    const pool = db;
 
     // Try to update first
     const updateResult = await pool.query(
       `UPDATE settings SET setting_value = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP
-       WHERE setting_key = $3
-       RETURNING *`,
+       WHERE setting_key = $3`,
       [String(value), req.user.user_id, key]
     );
 
-    if (updateResult.rows.length === 0) {
+    if (updateResult.rowsAffected[0] === 0) {
       // Insert if not exists
       await pool.query(
         `INSERT INTO settings (setting_key, setting_value, updated_by) VALUES ($1, $2, $3)`,
@@ -156,7 +155,7 @@ router.put('/:key', authorize('settings'), async (req, res, next) => {
 // Get all users
 router.get('/users/all', authorize('settings'), async (req, res, next) => {
   try {
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `SELECT u.user_id, u.employee_code, u.email, u.first_name, u.last_name, u.phone, 
               u.is_active, u.last_login, u.created_at,
@@ -203,13 +202,12 @@ router.post('/users', authorize('settings'), [
 
     const result = await db.query(
       `INSERT INTO users (employee_code, email, password_hash, first_name, last_name, phone, role_id, default_location_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING user_id, employee_code, email, first_name, last_name`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [employeeCode, email || null, hashedPassword, firstName, lastName || null, phone || null, roleId || 3, locationId || 1]
     );
 
-    const rows = result.rows || result.recordset || [];
-    res.status(201).json(rows[0]);
+    const newUser = await db.query('SELECT user_id, employee_code, email, first_name, last_name FROM users WHERE user_id = ?', [result.insertId]);
+    res.status(201).json(newUser.rows[0]);
   } catch (error) {
     next(error);
   }
@@ -218,7 +216,7 @@ router.post('/users', authorize('settings'), [
 // Get all roles
 router.get('/roles/all', async (req, res, next) => {
   try {
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `SELECT role_id, role_name, description, permissions FROM roles WHERE is_active = true ORDER BY role_name`
     );

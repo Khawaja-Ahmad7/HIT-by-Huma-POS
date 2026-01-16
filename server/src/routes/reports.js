@@ -9,7 +9,7 @@ router.use(authenticate);
 router.get('/dashboard', async (req, res, next) => {
   try {
     const { locationId, range, startDate, endDate } = req.query;
-    const pool = db.getPool();
+    const pool = db;
 
     const params = [];
     let locationFilter = '';
@@ -23,7 +23,7 @@ router.get('/dashboard', async (req, res, next) => {
     // Build time filter based on range or explicit start/end dates
     // timeFilter contains SQL fragment starting with ' AND '
     // Default to this week's data when no explicit range is provided
-    let timeFilter = ` AND s.created_at >= date_trunc('week', CURRENT_DATE)`;
+    let timeFilter = ` AND s.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)`;
     if (startDate) {
       timeFilter = ` AND s.created_at >= $${paramIndex++}`;
       params.push(startDate);
@@ -32,13 +32,13 @@ router.get('/dashboard', async (req, res, next) => {
         params.push(endDate);
       }
     } else if (range === 'week') {
-      timeFilter = ` AND s.created_at >= date_trunc('week', CURRENT_DATE)`;
+      timeFilter = ` AND s.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)`;
     } else if (range === 'today') {
-      timeFilter = ` AND DATE(s.created_at) = CURRENT_DATE`;
+      timeFilter = ` AND DATE(s.created_at) = CURDATE()`;
     } else if (range === 'month') {
-      timeFilter = ` AND s.created_at >= date_trunc('month', CURRENT_DATE)`;
+      timeFilter = ` AND s.created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')`;
     } else if (range === 'year') {
-      timeFilter = ` AND s.created_at >= date_trunc('year', CURRENT_DATE)`;
+      timeFilter = ` AND s.created_at >= DATE_FORMAT(CURDATE(), '%Y-01-01')`;
     }
 
     // Today's/selected range stats (include discounts)
@@ -71,15 +71,15 @@ router.get('/dashboard', async (req, res, next) => {
       lowStockParams
     );
 
-    // Top products today (includes manual items)
+    // Top products today
     const topProductsResult = await pool.query(
-      `SELECT COALESCE(p.product_name, si.notes) as product_name, pv.variant_name, SUM(si.quantity) as sold, SUM(si.line_total) as revenue
+      `SELECT p.product_name, pv.variant_name, SUM(si.quantity) as sold, SUM(si.line_total) as revenue
        FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
-       LEFT JOIN products p ON pv.product_id = p.product_id
+       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
+       INNER JOIN products p ON pv.product_id = p.product_id
        WHERE s.status = 'completed' ${timeFilter} ${locationFilter}
-       GROUP BY COALESCE(p.product_name, si.notes), pv.variant_name
+       GROUP BY p.product_name, pv.variant_name
        ORDER BY sold DESC
        LIMIT 5`,
       params
@@ -87,10 +87,10 @@ router.get('/dashboard', async (req, res, next) => {
 
     // Hourly sales
     const hourlyResult = await pool.query(
-      `SELECT EXTRACT(HOUR FROM s.created_at) as hour, COALESCE(SUM(s.total_amount), 0) as revenue
+      `SELECT HOUR(s.created_at) as hour, COALESCE(SUM(s.total_amount), 0) as revenue
        FROM sales s
        WHERE s.status = 'completed' ${timeFilter} ${locationFilter}
-       GROUP BY EXTRACT(HOUR FROM s.created_at)
+       GROUP BY HOUR(s.created_at)
        ORDER BY hour`,
       params
     );
@@ -171,13 +171,13 @@ router.get('/dashboard', async (req, res, next) => {
 router.get('/hourly-sales', async (req, res, next) => {
   try {
     const { range } = req.query; // currently only supporting 'today'
-    const pool = db.getPool();
+    const pool = db;
     const params = [];
     const result = await pool.query(
-      `SELECT EXTRACT(HOUR FROM s.created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue, COUNT(*) as transactions
+      `SELECT HOUR(s.created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue, COUNT(*) as transactions
        FROM sales s
-       WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed'
-       GROUP BY EXTRACT(HOUR FROM s.created_at)
+       WHERE DATE(s.created_at) = CURDATE() AND s.status = 'completed'
+       GROUP BY HOUR(s.created_at)
        ORDER BY hour`
     );
     res.json({ data: result.rows.map(h => ({ hour: parseInt(h.hour), sales: parseFloat(h.revenue) || 0, orders: parseInt(h.transactions) || 0 })) });
@@ -189,16 +189,16 @@ router.get('/hourly-sales', async (req, res, next) => {
 // Category breakdown (compatibility endpoint expected by frontend)
 router.get('/category-breakdown', async (req, res, next) => {
   try {
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
-      `SELECT COALESCE(c.category_name, 'Manual Items') as name, COALESCE(SUM(si.line_total),0) as revenue, COALESCE(SUM(si.quantity),0) as units
+      `SELECT c.category_name as name, COALESCE(SUM(si.line_total),0) as revenue, COALESCE(SUM(si.quantity),0) as units
        FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
-       LEFT JOIN products p ON pv.product_id = p.product_id
+       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
+       INNER JOIN products p ON pv.product_id = p.product_id
        LEFT JOIN categories c ON p.category_id = c.category_id
-       WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed'
-       GROUP BY COALESCE(c.category_name, 'Manual Items')
+       WHERE DATE(s.created_at) = CURDATE() AND s.status = 'completed'
+       GROUP BY c.category_name
        ORDER BY revenue DESC`);
     res.json({ data: result.rows.map(r => ({ name: r.name, revenue: parseFloat(r.revenue) || 0, units: parseInt(r.units) || 0 })) });
   } catch (error) {
@@ -209,12 +209,12 @@ router.get('/category-breakdown', async (req, res, next) => {
 // Realtime quick metrics used by dashboard
 router.get('/realtime', async (req, res, next) => {
   try {
-    const pool = db.getPool();
+    const pool = db;
     // Sales in last 60 seconds
     const result = await pool.query(
       `SELECT COUNT(*) as transactions, COALESCE(SUM(total_amount),0) as revenue
        FROM sales
-       WHERE created_at >= NOW() - INTERVAL '1 minute' AND status = 'completed'`);
+       WHERE created_at >= NOW() - INTERVAL 1 MINUTE AND status = 'completed'`);
     res.json({ transactions: parseInt(result.rows[0].transactions) || 0, revenue: parseFloat(result.rows[0].revenue) || 0 });
   } catch (error) {
     next(error);
@@ -225,15 +225,15 @@ router.get('/realtime', async (req, res, next) => {
 router.get('/employee-performance', async (req, res, next) => {
   try {
     const { limit = 5 } = req.query;
-    const pool = db.getPool();
+    const pool = db;
     const result = await pool.query(
       `SELECT u.user_id, u.first_name, u.last_name, COUNT(*) as transactions, COALESCE(SUM(s.total_amount),0) as revenue
        FROM sales s
        INNER JOIN users u ON s.user_id = u.user_id
-       WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed'
+       WHERE DATE(s.created_at) = CURDATE() AND s.status = 'completed'
        GROUP BY u.user_id, u.first_name, u.last_name
        ORDER BY revenue DESC
-       LIMIT $1`, [parseInt(limit)]
+       LIMIT ?`, [parseInt(limit)]
     );
     res.json({ data: result.rows.map(r => ({ user_id: r.user_id, name: `${r.first_name} ${r.last_name}`, transactions: parseInt(r.transactions) || 0, revenue: parseFloat(r.revenue) || 0 })) });
   } catch (error) {
@@ -245,7 +245,7 @@ router.get('/employee-performance', async (req, res, next) => {
 router.get('/sales', authorize('reports'), async (req, res, next) => {
   try {
     const { locationId, startDate, endDate, groupBy = 'day' } = req.query;
-    const pool = db.getPool();
+    const pool = db;
 
     const params = [];
     let whereClause = "WHERE status = 'completed'";
@@ -270,11 +270,11 @@ router.get('/sales', authorize('reports'), async (req, res, next) => {
     let selectDate = 'DATE(s.created_at) as date';
 
     if (groupBy === 'month') {
-      groupByClause = "TO_CHAR(s.created_at, 'YYYY-MM')";
-      selectDate = "TO_CHAR(s.created_at, 'YYYY-MM') as date";
+      groupByClause = "DATE_FORMAT(s.created_at, '%Y-%m')";
+      selectDate = "DATE_FORMAT(s.created_at, '%Y-%m') as date";
     } else if (groupBy === 'week') {
-      groupByClause = "DATE_TRUNC('week', s.created_at)";
-      selectDate = "DATE_TRUNC('week', s.created_at) as date";
+      groupByClause = "YEARWEEK(s.created_at, 1)";
+      selectDate = "STR_TO_DATE(CONCAT(YEARWEEK(s.created_at, 1), ' Monday'), '%X%V %W') as date";
     }
 
     const result = await pool.query(
@@ -322,17 +322,17 @@ router.get('/sales-by-category', authorize('reports'), async (req, res, next) =>
     }
 
     const result = await pool.query(
-      `SELECT COALESCE(c.category_name, 'Manual Items') as category_name, 
+      `SELECT c.category_name, 
         COUNT(DISTINCT s.sale_id) as transactions,
         SUM(si.quantity) as units_sold,
         COALESCE(SUM(si.line_total), 0) as revenue
        FROM sale_items si
        INNER JOIN sales s ON si.sale_id = s.sale_id
-       LEFT JOIN product_variants pv ON si.variant_id = pv.variant_id
-       LEFT JOIN products p ON pv.product_id = p.product_id
+       INNER JOIN product_variants pv ON si.variant_id = pv.variant_id
+       INNER JOIN products p ON pv.product_id = p.product_id
        LEFT JOIN categories c ON p.category_id = c.category_id
        ${whereClause}
-       GROUP BY COALESCE(c.category_name, 'Manual Items')
+       GROUP BY c.category_name
        ORDER BY revenue DESC`,
       params
     );
@@ -410,7 +410,7 @@ router.post('/z-report', authorize('reports'), async (req, res, next) => {
         COALESCE(SUM(discount_amount), 0) as total_discounts,
         COALESCE(SUM(tax_amount), 0) as total_tax
        FROM sales
-       WHERE location_id = $1 AND DATE(created_at) = CURRENT_DATE AND status = 'completed' ${shiftFilter}`,
+       WHERE location_id = $1 AND DATE(created_at) = CURDATE() AND status = 'completed' ${shiftFilter}`,
       params
     );
 
@@ -420,7 +420,7 @@ router.post('/z-report', authorize('reports'), async (req, res, next) => {
        FROM sale_payments sp
        INNER JOIN sales s ON sp.sale_id = s.sale_id
        INNER JOIN payment_methods pm ON sp.payment_method_id = pm.payment_method_id
-       WHERE s.location_id = $1 AND DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed' ${shiftFilter}
+       WHERE s.location_id = $1 AND DATE(s.created_at) = CURDATE() AND s.status = 'completed' ${shiftFilter}
        GROUP BY pm.method_name`,
       params
     );
